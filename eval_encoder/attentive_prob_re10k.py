@@ -31,6 +31,7 @@ from timm.models.layers import trunc_normal_
 from torch import distributed
 from torch.nn.utils import clip_grad_norm_
 from torch.optim.lr_scheduler import LinearLR
+from transformers import AutoModel
 
 # Import custom models and layers
 import model_factory
@@ -822,6 +823,14 @@ def evaluate(
     return metrics
 
 def get_model(args: argparse.Namespace) -> nn.Module:
+    if args.model_name == "hf_llava_vit_large_ln":
+        model = AutoModel.from_pretrained(
+            args.model_weight,
+            trust_remote_code=True,
+            attn_implementation="flash_attention_2"
+        )
+        return model
+    
     model = create_model(args.model_name, pretrained=False)
     if args.model_family in ["llava_vit_sampling"]:
         state_dict = torch.load(args.model_weight, map_location="cpu")
