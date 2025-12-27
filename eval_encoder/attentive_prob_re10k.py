@@ -66,6 +66,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model_weight", default="NULL")
     parser.add_argument("--num_frames", type=int, default=16,
                        help="Number of frames (16 frames for feature extraction, using first and last for pose)")
+    parser.add_argument("--probe_num_frames", type=int, default=4,
+                       help="Number of probe frames (S=4: 1 reference + 3 auxiliary frames)")
+    parser.add_argument("--probe_min_gap", type=int, default=5,
+                       help="Minimum frame gap between reference and auxiliary frames in probe sampling")
+    parser.add_argument("--max_context_window", type=int, default=16,
+                       help="Maximum context window (number of frames) supported by VidFM per chunk")
     parser.add_argument("--input_size", type=int, default=224)
     parser.add_argument("--embedding_size", type=int, default=768)
     parser.add_argument("--pose_hidden_dim", type=int, default=256,
@@ -399,53 +405,223 @@ def translation_error(pred_t: torch.Tensor, target_t: torch.Tensor) -> torch.Ten
     return error
 
 
+def compute_frame_to_chunk_mapping(num_frames: int, max_context_window: int) -> tuple:
+    """
+    Compute frame-to-chunk index mapping function π(t).
+    
+    Each chunk includes the global reference frame (frame 0) at the beginning,
+    followed by consecutive frames from the video.
+    
+    Args:
+        num_frames: Total number of frames in the video
+        max_context_window: Maximum number of frames per chunk (including reference frame)
+    
+    Returns:
+        frame_to_chunk: List of (chunk_id, local_idx) for each frame
+                       frame_to_chunk[t] = (chunk_id, local_idx) where:
+                       - chunk_id: which chunk the frame belongs to
+                       - local_idx: position within that chunk
+        num_chunks: Total number of chunks
+        chunk_frame_lists: List of frame indices for each chunk (including reference frame)
+    
+    Example:
+        num_frames=20, max_context_window=8
+        Chunk 0: [frame_0, frame_1, frame_2, ..., frame_7]   (8 frames: ref + 7 frames)
+        Chunk 1: [frame_0, frame_8, frame_9, ..., frame_14]  (8 frames: ref + 7 frames)  
+        Chunk 2: [frame_0, frame_15, frame_16, ..., frame_19] (6 frames: ref + 5 frames)
+        
+        π(0) = (0, 0), (1, 0), (2, 0)  # Frame 0 appears in all chunks at position 0
+        π(1) = (0, 1)                   # Frame 1 appears in chunk 0 at position 1
+        π(8) = (1, 1)                   # Frame 8 appears in chunk 1 at position 1
+    """
+    if num_frames <= 1:
+        # Special case: only one frame
+        return [(0, 0)], 1, [[0]]
+    
+    # Each chunk has: 1 reference frame + (max_context_window - 1) content frames
+    # Frame 0 is the global reference frame
+    content_frames_per_chunk = max_context_window - 1  # Reserve 1 slot for reference frame
+    
+    # Calculate number of chunks needed to cover all frames (excluding frame 0 which is reference)
+    num_content_frames = num_frames - 1  # Frames 1, 2, ..., num_frames-1
+    num_chunks = (num_content_frames + content_frames_per_chunk - 1) // content_frames_per_chunk
+    
+    # Initialize mapping
+    frame_to_chunk = [[] for _ in range(num_frames)]  # Each frame can appear in multiple chunks
+    chunk_frame_lists = []
+    
+    # Build chunks
+    for chunk_id in range(num_chunks):
+        # Each chunk starts with the reference frame (frame 0)
+        chunk_frames = [0]
+        
+        # Add content frames for this chunk
+        start_frame = 1 + chunk_id * content_frames_per_chunk
+        end_frame = min(start_frame + content_frames_per_chunk, num_frames)
+        
+        for frame_idx in range(start_frame, end_frame):
+            chunk_frames.append(frame_idx)
+        
+        # Record chunk structure
+        chunk_frame_lists.append(chunk_frames)
+        
+        # Update frame-to-chunk mapping
+        for local_idx, frame_idx in enumerate(chunk_frames):
+            frame_to_chunk[frame_idx].append((chunk_id, local_idx))
+    
+    return frame_to_chunk, num_chunks, chunk_frame_lists
+
+
 def get_feature(
     args: argparse.Namespace,
     images: torch.Tensor,
     model: nn.Module,
+    probe_frame_indices: torch.Tensor = None,
 ) -> torch.Tensor:
     """
-    Extract features from images.
+    Extract features from images with chunking support.
+    
+    For videos longer than max_context_window, the video is split into chunks.
+    Each chunk includes the first frame (reference frame) followed by consecutive frames.
+    Features are extracted per chunk and then mapped back to original frame positions.
     
     Args:
         args: Arguments
-        images: [B, 16, 3, H, W] - 16 uniformly sampled frames
+        images: [B, T, 3, H, W] - T uniformly sampled frames from video
         model: Encoder model
+        probe_frame_indices: [B, S] - Optional probe frame indices (for evaluation/probing)
+                            If provided, only extract features for these specific frames
     
     Returns:
-        features: [B, seq_len, hidden_dim] - Features from all 16 frames
-                  For image models: seq_len = 16*num_patches
-                  For video models: seq_len = num_video_tokens
+        features: [B, seq_len, hidden_dim] - Features for requested frames
+                  If probe_frame_indices provided: features for S probe frames
+                  Otherwise: features for all T frames
+                  For image models: seq_len = S*num_patches or T*num_patches
+                  For video models: seq_len depends on model's temporal pooling
     """
-    B, N, C, H, W = images.shape
-    assert N == 16, "Expected 16 frames"
+    B, T, C, H, W = images.shape
+    max_context = args.max_context_window
     
-    # Extract features from all 16 frames
-    with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-        with torch.no_grad():
+    # If video fits in context window, process directly without chunking
+    if T <= max_context and probe_frame_indices is None:
+        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+            with torch.no_grad():
+                if args.model_family in ["clip", "siglip", "siglip2", "dinov2", "dinov3", "metaclip", "llava_vit_si", "aimv2"]:
+                    # For image models, process frames individually
+                    all_frames = images.view(B * T, C, H, W)
+                    hidden_states = model(all_frames)
+                    if isinstance(hidden_states, dict) and "visible_embeddings" in hidden_states:
+                        hidden_states = hidden_states["visible_embeddings"]
+                    # Reshape back to [B, T*seq_len, hidden_dim]
+                    hidden_states = hidden_states.view(B, -1, hidden_states.size(-1))
+                elif args.model_family == "llava_vit_sampling":
+                    # For video models, use native video input format [B, C, T, H, W]
+                    videos = images.transpose(1, 2)  # [B, C, T, H, W]
+                    hidden_states = model(videos, None)
+                    if hasattr(hidden_states, "last_hidden_state"):
+                        hidden_states = hidden_states.last_hidden_state
+                    elif isinstance(hidden_states, dict) and "visible_embeddings" in hidden_states:
+                        hidden_states = hidden_states["visible_embeddings"]
+                else:
+                    raise ValueError(f"Unsupported model_family: {args.model_family}")
+        return hidden_states
+    
+    # Chunking is needed
+    device = images.device
+    
+    # Determine which frames to extract features for
+    if probe_frame_indices is not None:
+        # Probe mode: only extract features for specified frames
+        target_frames = probe_frame_indices  # [B, S]
+        S = target_frames.shape[1]
+    else:
+        # Full mode: extract features for all frames
+        target_frames = torch.arange(T, device=device).unsqueeze(0).expand(B, -1)  # [B, T]
+        S = T
+    
+    # Compute frame-to-chunk mapping (same for all samples in batch)
+    frame_to_chunk, num_chunks, chunk_frame_lists = compute_frame_to_chunk_mapping(T, max_context)
+    
+    # Extract features chunk by chunk
+    all_chunk_features = []  # List of [B, chunk_size, num_patches, hidden_dim] or [B, num_video_tokens, hidden_dim]
+    
+    for chunk_id in range(num_chunks):
+        chunk_frames = chunk_frame_lists[chunk_id]  # Frame indices in this chunk
+        chunk_size = len(chunk_frames)
+        
+        # Gather frames for this chunk: [B, chunk_size, C, H, W]
+        chunk_images = torch.stack([images[:, idx] for idx in chunk_frames], dim=1)
+        
+        # Extract features for this chunk
+        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+            with torch.no_grad():
+                if args.model_family in ["clip", "siglip", "siglip2", "dinov2", "dinov3", "metaclip", "llava_vit_si", "aimv2"]:
+                    # For image models, process frames individually
+                    chunk_frames_flat = chunk_images.view(B * chunk_size, C, H, W)
+                    chunk_hidden = model(chunk_frames_flat)
+                    if isinstance(chunk_hidden, dict) and "visible_embeddings" in chunk_hidden:
+                        chunk_hidden = chunk_hidden["visible_embeddings"]
+                    # Reshape to [B, chunk_size, num_patches, hidden_dim]
+                    num_patches = chunk_hidden.shape[-2] if len(chunk_hidden.shape) > 2 else 1
+                    chunk_hidden = chunk_hidden.view(B, chunk_size, -1, chunk_hidden.size(-1))
+                elif args.model_family == "llava_vit_sampling":
+                    # For video models with reference frame prepended
+                    chunk_videos = chunk_images.transpose(1, 2)  # [B, C, chunk_size, H, W]
+                    chunk_hidden = model(chunk_videos, None)
+                    if hasattr(chunk_hidden, "last_hidden_state"):
+                        chunk_hidden = chunk_hidden.last_hidden_state
+                    elif isinstance(chunk_hidden, dict) and "visible_embeddings" in chunk_hidden:
+                        chunk_hidden = chunk_hidden["visible_embeddings"]
+                    # chunk_hidden: [B, num_video_tokens, hidden_dim]
+                    # Need to reshape to per-frame features if possible
+                    # For simplicity, we'll store the entire chunk's features
+                else:
+                    raise ValueError(f"Unsupported model_family: {args.model_family}")
+        
+        all_chunk_features.append((chunk_id, chunk_frames, chunk_hidden))
+    
+    # Map features back to target frames using π(t)
+    # For each target frame, find its chunk and extract corresponding features
+    output_features = []
+    
+    for batch_idx in range(B):
+        batch_features = []
+        for frame_idx_in_target in range(S):
+            frame_idx = target_frames[batch_idx, frame_idx_in_target].item()
+            
+            # Get chunk and local position for this frame
+            chunk_mappings = frame_to_chunk[frame_idx]
+            
+            # Use the first occurrence (primary chunk for this frame)
+            chunk_id, local_idx = chunk_mappings[0]
+            
+            # Extract feature from the corresponding chunk
+            _, chunk_frames, chunk_hidden = all_chunk_features[chunk_id]
+            
+            # Get feature for this frame
             if args.model_family in ["clip", "siglip", "siglip2", "dinov2", "dinov3", "metaclip", "llava_vit_si", "aimv2"]:
-                # For image models, process frames individually
-                # Reshape to [B*16, C, H, W]
-                all_frames = images.view(B * N, C, H, W)
-                hidden_states = model(all_frames)
-                if isinstance(hidden_states, dict) and "visible_embeddings" in hidden_states:
-                    hidden_states = hidden_states["visible_embeddings"]
-                # Reshape back to [B, 16*seq_len, hidden_dim]
-                hidden_states = hidden_states.view(B, -1, hidden_states.size(-1))
+                # chunk_hidden: [B, chunk_size, num_patches, hidden_dim]
+                frame_feat = chunk_hidden[batch_idx, local_idx]  # [num_patches, hidden_dim]
+                batch_features.append(frame_feat)
             elif args.model_family == "llava_vit_sampling":
-                # For video models, use native video input format [B, C, T, H, W]
-                # Transpose from [B, T, C, H, W] to [B, C, T, H, W]
-                videos = images.transpose(1, 2)  # [B, C, 16, H, W]
-                hidden_states = model(videos, None)
-                if hasattr(hidden_states, "last_hidden_state"):
-                    hidden_states = hidden_states.last_hidden_state
-                elif isinstance(hidden_states, dict) and "visible_embeddings" in hidden_states:
-                    hidden_states = hidden_states["visible_embeddings"]
-                # hidden_states should already be in [B, seq_len, hidden_dim] format
-            else:
-                raise ValueError(f"Unsupported model_family: {args.model_family}")
+                # For video models, features might be temporally pooled
+                # We need to divide the features by chunk size to get per-frame features
+                # This is a simplified approach - actual implementation may vary
+                num_tokens = chunk_hidden.shape[1]
+                tokens_per_frame = num_tokens // len(chunk_frames)
+                start_idx = local_idx * tokens_per_frame
+                end_idx = start_idx + tokens_per_frame
+                frame_feat = chunk_hidden[batch_idx, start_idx:end_idx]  # [tokens_per_frame, hidden_dim]
+                batch_features.append(frame_feat)
+        
+        # Concatenate features for all target frames in this batch
+        batch_features = torch.cat(batch_features, dim=0)  # [S*num_patches or S*tokens_per_frame, hidden_dim]
+        output_features.append(batch_features)
     
-    return hidden_states
+    # Stack batch: [B, total_tokens, hidden_dim]
+    output_features = torch.stack(output_features, dim=0)
+    
+    return output_features
 
 
 def train_one_experiment(
@@ -502,12 +678,13 @@ def train_one_experiment(
         start_time = time.time()
         
         for i, batch in enumerate(train_loader):
-            images = batch["images"].to(device, non_blocking=True)  # [B, 2, 3, H, W]
+            images = batch["images"].to(device, non_blocking=True)  # [B, T, 3, H, W] where T=num_frames
             target_pose = batch["relative_pose"].to(device, non_blocking=True)  # [B, 12]
+            probe_indices = batch["probe_indices"].to(device, non_blocking=True)  # [B, T]
             
-            # Extract features
+            # Extract features (no probe mode in training, use all frames)
             with torch.no_grad():
-                feats = get_feature(args, images, base_model)
+                feats = get_feature(args, images, base_model, probe_frame_indices=None)
             
             # Predict pose
             with torch.cuda.amp.autocast(dtype=torch.bfloat16):
@@ -596,7 +773,7 @@ def evaluate(
     base_model: nn.Module,
     val_loader,
 ) -> Dict[str, float]:
-    """Evaluate pose estimation with EPE metric."""
+    """Evaluate pose estimation with EPE metric using probe sampling."""
     head.eval()
     
     total_loss = 0.0
@@ -606,11 +783,12 @@ def evaluate(
     num_batches = 0
     
     for batch in val_loader:
-        images = batch["images"].to(device, non_blocking=True)
-        target_pose = batch["relative_pose"].to(device, non_blocking=True)
+        images = batch["images"].to(device, non_blocking=True)  # [B, S, 3, H, W] where S=probe_num_frames
+        target_pose = batch["relative_pose"].to(device, non_blocking=True)  # [B, 12]
+        probe_indices = batch["probe_indices"].to(device, non_blocking=True)  # [B, S]
         
-        # Extract features and predict
-        feats = get_feature(args, images, base_model)
+        # Extract features with probe frame indices
+        feats = get_feature(args, images, base_model, probe_frame_indices=probe_indices)
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             pred_pose = head(feats)
             loss = pose_loss(pred_pose, target_pose)
@@ -694,6 +872,8 @@ def main():
 
     if args.rank == 0:
         print("Using DALI dataloader for optimized multi-GPU performance")
+    
+    # Training: use normal mode (16 frames for full feature extraction)
     train_loader = get_re10k_dataloader_dali(
         re10k_dir=args.re10k_dir,
         re10k_annotation_dir=args.re10k_annotation_dir,
@@ -708,8 +888,11 @@ def main():
         py_start_method=args.py_start_method,
         seed=args.seed,
         rank=args.rank,
+        probe_mode=False,  # Normal mode for training
+        num_frames_to_sample=args.num_frames,
     )
     
+    # Validation: use probe mode (S=4 frames with constraints)
     val_loader = get_re10k_dataloader_dali(
         re10k_dir=args.re10k_dir,
         re10k_annotation_dir=args.re10k_annotation_dir,
@@ -724,6 +907,9 @@ def main():
         py_start_method=args.py_start_method,
         seed=args.seed,
         rank=args.rank,
+        probe_mode=True,  # Probe mode for evaluation
+        probe_num_frames=args.probe_num_frames,
+        probe_min_gap=args.probe_min_gap,
     )
 
     if args.rank == 0:
