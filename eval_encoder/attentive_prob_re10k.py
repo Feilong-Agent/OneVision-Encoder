@@ -488,23 +488,22 @@ def get_feature(
     
     Args:
         args: Arguments
-        images: [B, T, 3, H, W] - T uniformly sampled frames from video
+        images: [B, T, 3, H, W] - T frames from video (already selected/sampled)
         model: Encoder model
-        probe_frame_indices: [B, S] - Optional probe frame indices (for evaluation/probing)
-                            If provided, only extract features for these specific frames
+        probe_frame_indices: [B, T] - Optional metadata tracking original video frame indices.
+                            This is for bookkeeping only and not used for indexing.
+                            The images tensor already contains the selected frames.
     
     Returns:
-        features: [B, seq_len, hidden_dim] - Features for requested frames
-                  If probe_frame_indices provided: features for S probe frames
-                  Otherwise: features for all T frames
-                  For image models: seq_len = S*num_patches or T*num_patches
+        features: [B, seq_len, hidden_dim] - Features for all T frames in images
+                  For image models: seq_len = T*num_patches
                   For video models: seq_len depends on model's temporal pooling
     """
     B, T, C, H, W = images.shape
     max_context = args.max_context_window
     
     # If video fits in context window, process directly without chunking
-    if T <= max_context and probe_frame_indices is None:
+    if T <= max_context:
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             with torch.no_grad():
                 if args.model_family in ["clip", "siglip", "siglip2", "dinov2", "dinov3", "metaclip", "llava_vit_si", "aimv2"]:
@@ -530,15 +529,13 @@ def get_feature(
     # Chunking is needed
     device = images.device
     
-    # Determine which frames to extract features for
-    if probe_frame_indices is not None:
-        # Probe mode: only extract features for specified frames
-        target_frames = probe_frame_indices  # [B, S]
-        S = target_frames.shape[1]
-    else:
-        # Full mode: extract features for all frames
-        target_frames = torch.arange(T, device=device).unsqueeze(0).expand(B, -1)  # [B, T]
-        S = T
+    # Note: probe_frame_indices contains original video frame indices (for tracking),
+    # but we always work with local indices (0 to T-1) within the current batch
+    # The images tensor already contains the selected frames in order
+    S = T  # Number of frames to process (same as T since images already contains selected frames)
+    
+    # Use local frame indices (0, 1, 2, ..., T-1) for indexing within current batch
+    target_frames = torch.arange(T, device=device).unsqueeze(0).expand(B, -1)  # [B, T]
     
     # Compute frame-to-chunk mapping (same for all samples in batch)
     frame_to_chunk, num_chunks, chunk_frame_lists = compute_frame_to_chunk_mapping(T, max_context)
