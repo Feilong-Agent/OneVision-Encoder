@@ -58,6 +58,7 @@ class DALIWrapper:
         return {
             "images": data_dict["images"],
             "relative_pose": data_dict["relative_pose"],
+            "probe_indices": data_dict["probe_indices"],
         }
 
     def __iter__(self):
@@ -390,6 +391,12 @@ class RE10KExternalSource:
         self.input_size: int = source_params["input_size"]
         self.seed: int = source_params["seed"]
         self.re10k_dir: str = source_params["re10k_dir"]
+        
+        # Probe sampling parameters
+        self.probe_mode: bool = source_params.get("probe_mode", False)
+        self.probe_num_frames: int = source_params.get("probe_num_frames", 4)  # S=4
+        self.probe_min_gap: int = source_params.get("probe_min_gap", 5)  # Minimum gap of 5 frames
+        self.num_frames_to_sample: int = source_params.get("num_frames_to_sample", 16)
 
         # Jitter parameters for training
         if mode == "train":
@@ -582,10 +589,13 @@ class RE10KExternalSource:
 
     def __call__(self, sample_info) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Returns: (images, target_pose, dummy)
-        - images: [16, H, W, 3] - 16 frames uniformly sampled (uint8)
-        - target_pose: [12] - Absolute pose of the 16th frame after normalization (float32)
-        - dummy: empty array for DALI compatibility
+        Returns: (images, target_pose, probe_indices)
+        - images: [T, H, W, 3] - T uniformly sampled frames (uint8)
+                  T = probe_num_frames (e.g., 4) in probe mode
+                  T = num_frames_to_sample (e.g., 16) in normal mode
+        - target_pose: [12] - Relative pose between first and last frame (float32)
+        - probe_indices: [T] - Frame indices in the original uniformly sampled sequence (int64)
+                         Used for index mapping π(t)
         """
         # Ensure data is loaded (lazy loading for worker processes)
         self._ensure_data_loaded()
@@ -602,46 +612,87 @@ class RE10KExternalSource:
         sequence_name = self.sequence_list[sample_idx]
         metadata = self.wholedata[sequence_name]
 
-        # Sample 16 frames uniformly from the video
-        # Following the new training paradigm: extract features from 16 frames,
-        # then use only first and last frame features for pose prediction
+        # Step 1: Uniformly sample frames from the video with fixed time step
         num_frames_total = len(metadata)
-        num_frames_to_sample = 16
         
-        if num_frames_total >= num_frames_to_sample:
-            if self.mode == "train":
-                # Training: randomly select a segment of the video that has at least 16 frames
-                # Then sample 16 frames uniformly from this segment
-                # This allows for data augmentation while keeping temporal structure
-                
-                # Determine the segment length (can be longer than 16 frames)
-                min_segment_length = num_frames_to_sample
-                max_segment_length = num_frames_total
-                
-                # Randomly choose segment length
-                segment_length = self.rng.integers(min_segment_length, max_segment_length + 1)
-                
-                # Randomly choose start position of segment
-                max_start_idx = num_frames_total - segment_length
-                if max_start_idx > 0:
-                    start_idx = self.rng.integers(0, max_start_idx + 1)
-                else:
-                    start_idx = 0
-                
-                end_idx = start_idx + segment_length
-                
-                # Uniformly sample 16 frames from this segment
-                ids = np.linspace(start_idx, end_idx - 1, num_frames_to_sample, dtype=int).tolist()
+        if self.probe_mode:
+            # Probe mode: Sample S frames (default S=4)
+            # - Always use first frame as reference
+            # - Sample (S-1) auxiliary frames with minimum gap constraint
+            S = self.probe_num_frames
+            min_gap = self.probe_min_gap
+            
+            # We need at least min_gap+1 frames for a valid sample
+            # (frame 0 + at least one frame at distance >= min_gap)
+            if num_frames_total < min_gap + 1:
+                # Not enough frames - use all available frames
+                ids = list(range(num_frames_total))
+                # Pad by repeating the last frame if needed
+                ids += [num_frames_total - 1] * (S - num_frames_total)
             else:
-                # Evaluation: uniformly sample 16 frames from the entire video
-                ids = np.linspace(0, num_frames_total - 1, num_frames_to_sample, dtype=int).tolist()
+                # Start with the reference frame (frame 0)
+                ids = [0]
+                
+                # Sample (S-1) auxiliary frames
+                # Ensure minimum gap of min_gap frames between each auxiliary frame and reference frame
+                # Available frames: min_gap, min_gap+1, ..., num_frames_total-1
+                available_frames = list(range(min_gap, num_frames_total))
+                
+                if len(available_frames) >= S - 1:
+                    # Enough frames: uniformly sample from available frames
+                    if self.mode == "train":
+                        # Random sampling for training
+                        aux_frames = self.rng.choice(available_frames, size=S-1, replace=False)
+                        aux_frames = sorted(aux_frames.tolist())
+                    else:
+                        # Uniform sampling for evaluation
+                        aux_indices = np.linspace(0, len(available_frames)-1, S-1, dtype=int)
+                        aux_frames = [available_frames[i] for i in aux_indices]
+                else:
+                    # Not enough frames: use all available frames
+                    aux_frames = available_frames
+                    # Pad by repeating the last frame
+                    aux_frames += [num_frames_total - 1] * (S - 1 - len(aux_frames))
+                
+                ids.extend(aux_frames)
         else:
-            # Not enough frames - repeat frames to reach 16
-            ids = list(range(num_frames_total))
-            # Pad by repeating the last frame
-            ids += [num_frames_total - 1] * (num_frames_to_sample - num_frames_total)
+            # Normal mode: Sample num_frames_to_sample frames uniformly
+            num_frames_to_sample = self.num_frames_to_sample
+            
+            if num_frames_total >= num_frames_to_sample:
+                if self.mode == "train":
+                    # Training: randomly select a segment of the video that has at least num_frames_to_sample frames
+                    # Then sample num_frames_to_sample frames uniformly from this segment
+                    # This allows for data augmentation while keeping temporal structure
+                    
+                    # Determine the segment length (can be longer than num_frames_to_sample frames)
+                    min_segment_length = num_frames_to_sample
+                    max_segment_length = num_frames_total
+                    
+                    # Randomly choose segment length
+                    segment_length = self.rng.integers(min_segment_length, max_segment_length + 1)
+                    
+                    # Randomly choose start position of segment
+                    max_start_idx = num_frames_total - segment_length
+                    if max_start_idx > 0:
+                        start_idx = self.rng.integers(0, max_start_idx + 1)
+                    else:
+                        start_idx = 0
+                    
+                    end_idx = start_idx + segment_length
+                    
+                    # Uniformly sample num_frames_to_sample frames from this segment
+                    ids = np.linspace(start_idx, end_idx - 1, num_frames_to_sample, dtype=int).tolist()
+                else:
+                    # Evaluation: uniformly sample num_frames_to_sample frames from the entire video
+                    ids = np.linspace(0, num_frames_total - 1, num_frames_to_sample, dtype=int).tolist()
+            else:
+                # Not enough frames - repeat frames to reach num_frames_to_sample
+                ids = list(range(num_frames_total))
+                # Pad by repeating the last frame
+                ids += [num_frames_total - 1] * (num_frames_to_sample - num_frames_total)
 
-        # Load and process all 16 frames
+        # Step 2: Load and process all sampled frames
         eval_time = (self.mode != "train")
         images = []
         focal_lengths = []
@@ -658,27 +709,26 @@ class RE10KExternalSource:
             rotations.append(R)
             translations.append(T)
 
-        # Normalize cameras - use all frames for better normalization
+        # Step 3: Normalize cameras - use all frames for better normalization
         R_norm, T_norm = normalize_cameras_simple(rotations, translations, first_camera=True)
 
-        # Get the pose of the 16th frame (last frame) after normalization
-        # This is the target pose we want to predict
-        R_target = R_norm[-1]  # Rotation of frame 15 (16th frame, 0-indexed)
-        T_target = T_norm[-1]  # Translation of frame 15
+        # Step 4: Compute relative pose between first and last frame
+        # For probe mode with S=4: relative pose between frame 0 (reference) and frame 3 (last auxiliary)
+        # For normal mode with T frames: relative pose between frame 0 and frame T-1
+        R_first = R_norm[0]
+        T_first = T_norm[0]
+        R_last = R_norm[-1]
+        T_last = T_norm[-1]
         
-        # Flatten rotation matrix and concatenate with translation to form pose vector
-        R_target_flat = R_target.reshape(-1)  # [9]
-        target_pose = np.concatenate([R_target_flat, T_target]).astype(np.float32)  # [12]
+        # Compute relative pose from first to last frame
+        relative_pose = compute_relative_pose(R_first, T_first, R_last, T_last)
 
-        # Stack images: [16, H, W, 3]
-        # Images might have different sizes due to cropping, so we need to resize them
-        # Use cv2 for faster resizing if available, otherwise fall back to PIL
+        # Step 5: Resize images to target size
         target_size = self.input_size
         images_resized = []
         for img in images:
             # Fast resizing with cv2 if available
             if HAS_CV2:
-                # cv2.resize is significantly faster than PIL
                 img_resized = cv2.resize(img, (target_size, target_size), interpolation=cv2.INTER_LINEAR)
                 images_resized.append(img_resized)
             else:
@@ -686,9 +736,12 @@ class RE10KExternalSource:
                 img_resized = img_pil.resize((target_size, target_size), Image.BILINEAR)
                 images_resized.append(np.array(img_resized))
 
-        images_array = np.stack(images_resized, axis=0).astype(np.uint8)  # [16, H, W, 3]
+        images_array = np.stack(images_resized, axis=0).astype(np.uint8)  # [T, H, W, 3]
+        
+        # Return probe indices for index mapping π(t)
+        probe_indices = np.array(ids, dtype=np.int64)
 
-        return images_array, target_pose, np.array([0], dtype=np.int64)
+        return images_array, relative_pose, probe_indices
 
 
 def preprocess_images_re10k(images, mode, input_size):
@@ -696,7 +749,7 @@ def preprocess_images_re10k(images, mode, input_size):
     Preprocess RE10K images with DALI GPU operations.
     
     Args:
-        images: [16, H, W, C] format - 16 uniformly sampled frames
+        images: [T, H, W, C] format - T uniformly sampled frames (T=4 in probe mode, T=16 in normal mode)
         mode: "train" or "test"
         input_size: Target size
     
@@ -734,7 +787,7 @@ def preprocess_images_re10k(images, mode, input_size):
     images = fn.crop_mirror_normalize(
         images,
         dtype=types.FLOAT,
-        output_layout="FCHW",  # [F, C, H, W] where F=16 (16 uniformly sampled frames)
+        output_layout="FCHW",  # [F, C, H, W] where F=T (T frames)
         mean=[0.0, 0.0, 0.0],
         std=[255.0, 255.0, 255.0],
         device="gpu",
@@ -750,8 +803,9 @@ def preprocess_images_re10k(images, mode, input_size):
 def dali_re10k_pipeline(mode: str, source_params: Dict[str, Any]):
     input_size = source_params["input_size"]
 
-    # External source returns: images [2, H, W, 3], relative_pose [12], dummy
-    images, relative_pose, _ = fn.external_source(
+    # External source returns: images [T, H, W, 3], relative_pose [12], probe_indices [T]
+    # T = probe_num_frames (e.g., 4) in probe mode, T = num_frames_to_sample (e.g., 16) in normal mode
+    images, relative_pose, probe_indices = fn.external_source(
         source=RE10KExternalSource(mode, source_params),
         num_outputs=3,
         batch=False,
@@ -762,10 +816,11 @@ def dali_re10k_pipeline(mode: str, source_params: Dict[str, Any]):
 
     images = images.gpu()
     relative_pose = relative_pose.gpu()
+    probe_indices = probe_indices.gpu()
 
     images = preprocess_images_re10k(images, mode, input_size)
 
-    return images, relative_pose
+    return images, relative_pose, probe_indices
 
 
 # ----------------------------------------------------------------------------
@@ -787,9 +842,25 @@ def get_re10k_dataloader_dali(
     min_num_images: int = 5,
     num_workers: int = None,  # For API compatibility, not used
     shuffle: bool = None,  # For API compatibility, not used
+    probe_mode: bool = False,  # New: enable probe sampling mode
+    probe_num_frames: int = 4,  # New: number of probe frames (S=4)
+    probe_min_gap: int = 5,  # New: minimum frame gap for probe sampling
+    num_frames_to_sample: int = 16,  # New: number of frames to sample in normal mode
 ) -> DALIWrapper:
     """
     Create a DALI-based DataLoader for RE10K dataset with performance optimizations.
+    
+    Supports two modes:
+    1. Normal mode (probe_mode=False): Sample num_frames_to_sample frames uniformly from video
+       - Used for training with full video context
+       - Frames are split into chunks if exceeding max_context_window
+       - Each chunk includes reference frame (frame 0) prepended
+    
+    2. Probe mode (probe_mode=True): Sample probe_num_frames key frames with constraints
+       - Used for evaluation/probing with reduced computation
+       - Always includes first frame as reference
+       - Additional frames sampled with minimum gap of probe_min_gap frames
+       - Example: S=4 means 1 reference + 3 auxiliary frames with ≥5 frame gaps
     
     Optimizations implemented:
     - GPU-accelerated image preprocessing (resize, augmentation, normalization)
@@ -830,9 +901,22 @@ def get_re10k_dataloader_dali(
         min_num_images: Minimum number of images per sequence
         num_workers: For API compatibility with PyTorch DataLoader (not used)
         shuffle: For API compatibility with PyTorch DataLoader (not used)
+        probe_mode: Enable probe sampling mode (default: False)
+                   - False: sample num_frames_to_sample frames uniformly (training mode)
+                   - True: sample probe_num_frames key frames with constraints (evaluation mode)
+        probe_num_frames: Number of probe frames when probe_mode=True (default: 4, i.e., S=4)
+                         Always includes first frame as reference + (S-1) auxiliary frames
+        probe_min_gap: Minimum frame gap between reference and auxiliary frames (default: 5)
+                      Ensures sufficient temporal separation for meaningful probe sampling
+        num_frames_to_sample: Number of frames to sample when probe_mode=False (default: 16)
+                             Used for training with full video context
     
     Returns:
         dataloader: DALI-based dataloader wrapped in DALIWrapper
+                   Yields batches with keys: "images", "relative_pose", "probe_indices"
+                   - images: [B, T, C, H, W] where T depends on mode
+                   - relative_pose: [B, 12] relative pose between first and last frame
+                   - probe_indices: [B, T] frame indices for mapping π(t)
     
     Note: Images are normalized to [0, 1] range without mean/std normalization,
           consistent with the original RE10K PyTorch dataloader.
@@ -1080,6 +1164,10 @@ def get_re10k_dataloader_dali(
         "seed": seed + rank,
         "re10k_dir": re10k_dir,
         "image_cache_size": image_cache_size,
+        "probe_mode": probe_mode,
+        "probe_num_frames": probe_num_frames,
+        "probe_min_gap": probe_min_gap,
+        "num_frames_to_sample": num_frames_to_sample,
     }
 
     # Use the specified process start method
@@ -1104,7 +1192,7 @@ def get_re10k_dataloader_dali(
     # Create DALI iterator
     dali_iter = DALIGenericIterator(
         pipelines=[pipe],
-        output_map=["images", "relative_pose"],
+        output_map=["images", "relative_pose", "probe_indices"],
         auto_reset=True,
         prepare_first_batch=True  # Optimization: prepare first batch immediately for faster training start
     )
