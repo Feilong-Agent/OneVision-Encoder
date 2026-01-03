@@ -112,7 +112,7 @@ try:
     imagebox = OffsetImage(img, zoom=0.18)
     ab = AnnotationBbox(imagebox, (0, 0), frameon=False, zorder=11)
     ax.add_artist(ab)
-except (FileNotFoundError, OSError) as e:
+except (FileNotFoundError, OSError):
     # 如果图片加载失败，显示备用文本
     ax.text(
         0, 0,
@@ -130,7 +130,7 @@ for angle, benchmark in zip(angles, benchmarks):
     # 计算标签位置
     rotation = np.degrees(angle)
     # 调整文字旋转使其可读
-    if rotation > 90 and rotation < 270:
+    if 90 < rotation < 270:
         rotation = rotation + 180
     
     ax.text(
