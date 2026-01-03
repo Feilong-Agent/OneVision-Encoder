@@ -55,11 +55,10 @@ radial_start = 35  # 柱状图起始位置（内圈半径）
 radial_end = 75    # 柱状图结束位置（缩短长度）
 
 # 计算所有数据的最小值和最大值，用于智能缩放
-all_values = []
-for v in scores.values():
-    all_values.extend(v)
+all_values = [v for values_list in scores.values() for v in values_list]
 min_val = min(all_values)
 max_val = max(all_values)
+value_range = max_val - min_val
 
 # 使用基线缩放：将最小值映射到30%的高度，最大值映射到100%
 # 这样即使小数值也能清晰显示
@@ -74,7 +73,11 @@ for i, model in enumerate(models):
     
     # 将原始分数映射到缩短的范围，使用基线缩放
     # 公式：scaled = baseline_ratio + (value - min) / (max - min) * (1 - baseline_ratio)
-    normalized_values = (np.array(values) - min_val) / (max_val - min_val)
+    if value_range > 0:
+        normalized_values = (np.array(values) - min_val) / value_range
+    else:
+        # 如果所有值相同，使用中间值
+        normalized_values = np.ones_like(values) * 0.5
     scaled_values = (baseline_ratio + normalized_values * (1 - baseline_ratio)) * (radial_end - radial_start)
 
     bars = ax.bar(
@@ -90,7 +93,7 @@ for i, model in enumerate(models):
     )
 
     # 数值标注（在柱状图内部顶端，沿着柱状方向）
-    for angle, val, scaled_val in zip(angles + offset, values, scaled_values):
+    for j, (angle_with_offset, val, scaled_val) in enumerate(zip(angles + offset, values, scaled_values)):
         # 将数值放在柱状图顶端（接近radial_start + scaled_val）
         text_radius = radial_start + scaled_val * 0.85  # 在顶端85%位置
         
@@ -100,23 +103,24 @@ for i, model in enumerate(models):
         else:
             text_color = 'black'
         
-        # 计算旋转角度，使文字完全沿着柱状方向
-        text_rotation = np.degrees(angle)
+        # 使用基础角度（不加offset）来确保同一数据集的所有数值朝向一致
+        base_angle = angles[j]
+        text_rotation = np.degrees(base_angle)
         
-        # 调整旋转方向使文字始终可读
+        # 调整旋转方向使文字始终可读，所有同一数据集的数值保持相同朝向
         if 90 < text_rotation < 270:
             text_rotation = text_rotation - 90  # 向内旋转
         else:
             text_rotation = text_rotation + 90  # 向外旋转
         
         ax.text(
-            angle,
+            angle_with_offset,  # 位置使用带offset的角度
             text_radius,
             f"{val:.1f}",
             ha="center",
             va="center",
             fontsize=6.5,
-            rotation=text_rotation,
+            rotation=text_rotation,  # 旋转使用基础角度
             rotation_mode="anchor",
             color=text_color,
             fontweight='bold'
