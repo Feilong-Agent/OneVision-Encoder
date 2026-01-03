@@ -3,35 +3,44 @@ import matplotlib.pyplot as plt
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 
 # ======================
-# 1. 数据（示例，可替换）
+# 1. 数据（Video和Image任务）
 # ======================
-benchmarks = [
-    "SSV2", "Diving48", "Perception Test", "CharadesEgo",
-    "Epic_Verb", "Epic_Noun", "K400", "HMDB51"
+# Video任务的benchmarks
+video_benchmarks = [
+    "MVBench", "MLVU-dev", "NExT-QA (MC)", "VideoMME",
+    "Perception Test", "TOMATO", "LongVideoBenc-Val-Video"
 ]
 
-# 每个 benchmark 对应 5 个模型的分数
+# Image任务的benchmarks
+image_benchmarks = [
+    "ChartQA", "DocVQA", "InfoVQA", "MMBench-EN",
+    "OCRBench", "OCRBench v2", "MMStar", "RealWorldQA"
+]
+
+# 合并所有benchmarks
+benchmarks = video_benchmarks + image_benchmarks
+
+# 每个 benchmark 对应的模型分数（使用Qwen3-4B的数据）
 scores = {
-    "MetaCLIP2": [45.9, 30.7, 46.4, 10.2, 44.4, 36.6, 79.1, 77.0],
-    "DINOv3": [56.1, 50.7, 58.1, 12.4, 60.0, 47.9, 81.4, 81.4],
-    "SigLIP2": [57.9, 53.2, 56.3, 12.8, 58.8, 45.2, 81.3, 82.1],
-    "AIMv2": [53.8, 45.3, 52.9, 11.5, 54.4, 42.7, 79.0, 81.5],
-    "OV-Encoder": [57.5, 65.9, 59.6, 12.1, 61.8, 53.7, 84.3, 83.2],
+    "OV-ViT-Codec": [51.9, 44.7, 74.6, 54.6, 60.4, 21.2, 50.4, 78.6, 79.7, 44.8, 78.5, 617, None, 52.8, 61.7],
+    "OV-ViT": [49.8, 49.4, 71.9, 49.3, 56.7, 21.8, 45.5, 77.8, 79.5, 45.5, 78.5, 630.0, 26.1, 54.3, 61.2],
+    "SigLIP2": [47.2, 48.4, 70.6, 46.8, 56.0, 22.3, 45.2, 76.4, 75.0, 42.0, 79.6, 621.0, 26.1, 55.0, 62.1],
 }
+
+# Note: OCRBench和OCRBench v2使用原始数值，其他都是百分比
+# 我们需要归一化OCRBench的值以便可视化
 
 models = list(scores.keys())
 num_models = len(models)
 num_bench = len(benchmarks)
 
 # ======================
-# 2. 统一配色（重点）
+# 2. 统一配色（与fig1保持一致的风格）
 # ======================
 colors = {
-    "OV-Encoder": "#5B5BD6",   # 蓝紫 (OV-Encoder是蓝色)
-    "MetaCLIP2": "#B7DDB0",    # 浅绿
-    "DINOv3": "#F6D8B8",       # 米色
-    "SigLIP2": "#F39AC1",      # 粉色
-    "AIMv2": "#C8A2C8",        # 淡紫色
+    "OV-ViT-Codec": "#5B5BD6",   # 蓝紫 (主要方法)
+    "OV-ViT": "#B7DDB0",          # 浅绿
+    "SigLIP2": "#F39AC1",         # 粉色
 }
 
 # ======================
@@ -55,7 +64,18 @@ radial_start = 35  # 柱状图起始位置（内圈半径）
 radial_end = 75    # 柱状图结束位置（缩短长度）
 
 # 计算所有数据的最小值和最大值，用于智能缩放
-all_values = [v for values_list in scores.values() for v in values_list]
+# 归一化OCRBench数据：将600-630范围映射到0-100
+all_values = []
+for model_name, values_list in scores.items():
+    for i, v in enumerate(values_list):
+        if v is not None:
+            # OCRBench (index 11) 归一化
+            if i == 11:
+                normalized_v = (v - 500) / 2  # 500->0, 700->100
+                all_values.append(normalized_v)
+            else:
+                all_values.append(v)
+
 min_val = min(all_values)
 max_val = max(all_values)
 value_range = max_val - min_val
@@ -68,7 +88,18 @@ baseline_ratio = 0.3  # 最小值显示为30%高度
 # 4. 画 bars（缩短后的柱状图）
 # ======================
 for i, model in enumerate(models):
-    values = scores[model]
+    values_raw = scores[model]
+    
+    # 归一化处理
+    values = []
+    for j, v in enumerate(values_raw):
+        if v is None:
+            values.append(0)  # None值用0代替，后面不显示
+        elif j == 11:  # OCRBench归一化
+            values.append((v - 500) / 2)
+        else:
+            values.append(v)
+    
     offset = (i - (num_models - 1) / 2) * bar_width
     
     # 将原始分数映射到缩短的范围，使用基线缩放
@@ -93,12 +124,15 @@ for i, model in enumerate(models):
     )
 
     # 数值标注（在柱状图内部顶端，沿着柱状方向）
-    for j, (angle_with_offset, val, scaled_val) in enumerate(zip(angles + offset, values, scaled_values)):
+    for j, (angle_with_offset, val_raw, scaled_val) in enumerate(zip(angles + offset, values_raw, scaled_values)):
+        if val_raw is None:
+            continue  # 跳过None值
+            
         # 将数值放在柱状图顶端（接近radial_start + scaled_val）
         text_radius = radial_start + scaled_val * 0.85  # 在顶端85%位置
         
-        # 根据模型选择文字颜色：OV-Encoder用白色，其他用黑色
-        if model == "OV-Encoder":
+        # 根据模型选择文字颜色：OV-ViT-Codec用白色，其他用黑色
+        if model == "OV-ViT-Codec":
             text_color = 'white'
         else:
             text_color = 'black'
@@ -113,10 +147,18 @@ for i, model in enumerate(models):
         else:
             text_rotation = text_rotation + 90  # 向外旋转
         
+        # 显示原始值
+        if j == 11:  # OCRBench显示原始分数
+            display_val = f"{int(val_raw)}"
+        elif j == 12:  # OCRBench v2
+            display_val = f"{val_raw:.1f}"
+        else:
+            display_val = f"{val_raw:.1f}"
+        
         ax.text(
             angle_with_offset,  # 位置使用带offset的角度
             text_radius,
-            f"{val:.1f}",
+            display_val,
             ha="center",
             va="center",
             fontsize=6.5,
@@ -127,26 +169,23 @@ for i, model in enumerate(models):
         )
 
 # ======================
-# 5. benchmark 标签（放在内圈）
+# 5. 配置极坐标
 # ======================
-ax.set_xticks(angles)
-# 将标签设置为空，我们手动添加到内圈
-ax.set_xticklabels([])
-
-# 先不添加标签，等白色圆圈画完后再添加（确保标签在上层）
-
+ax.set_xticks([])
 ax.set_yticks([])
-ax.set_ylim(0, radial_end + 10)  # 调整y轴范围
+ax.set_ylim(0, radial_end + 10)
 
 # ======================
-# 6. 中心留白（放 logo）- 增大内圈
+# 6. 中间白色圆圈 + 图片
 # ======================
-# 增大中心圆，覆盖更大区域
-circle = plt.Circle((0, 0), radial_start - 3, transform=ax.transData._b, color="white", zorder=10)
-ax.add_artist(circle)
-
-# 加载并显示图片在中间
-# 注意：需要在当前目录下提供 intro_tem.jpg 图片文件
+white_circle = plt.Circle(
+    (0, 0),
+    radial_start - 3,
+    transform=ax.transData._b,
+    color="white",
+    zorder=10
+)
+ax.add_artist(white_circle)
 
 try:
     img = plt.imread("intro_tem.jpg")
@@ -166,55 +205,8 @@ except (FileNotFoundError, OSError):
         zorder=11
     )
 
-# 现在在白色圆圈外围添加标签（在柱状图起始位置）
-# 为每个数据集添加弧线标记和弧形文字
-# 注释掉数据集标签，用户将在PPT中手动添加
-# arc_radius = radial_start - 6  # 弧线位置
-# label_radius = radial_start - 9  # 文字在弧线下方
-# 
-# for angle, benchmark in zip(angles, benchmarks):
-#     # 计算每个benchmark占据的角度范围
-#     arc_width = 2 * np.pi / num_bench * 0.7  # 弧线宽度
-#     
-#     # 绘制弧线
-#     arc_angles = np.linspace(angle - arc_width/2, angle + arc_width/2, 50)
-#     arc_x = arc_angles
-#     arc_y = np.full_like(arc_angles, arc_radius)
-#     ax.plot(arc_x, arc_y, color='#999999', linewidth=2, alpha=0.5, zorder=12)
-#     
-#     # 将文字按弧形排列（每个字符单独放置）
-#     text_len = len(benchmark)
-#     if text_len > 0:
-#         # 计算字符间距，使文字沿着弧线分布
-#         char_arc_width = arc_width * 0.75  # 字符占用的弧线宽度
-#         char_angles = np.linspace(angle - char_arc_width/2, angle + char_arc_width/2, text_len)
-#         
-#         for char_angle, char in zip(char_angles, benchmark):
-#             # 计算每个字符的旋转角度
-#             rotation = np.degrees(char_angle)
-#             
-#             # 调整文字旋转使其沿着弧线方向，且可读
-#             if 90 < rotation < 270:
-#                 rotation = rotation + 180
-#                 va = 'top'
-#             else:
-#                 va = 'bottom'
-#             
-#             ax.text(
-#                 char_angle,
-#                 label_radius,
-#                 char,
-#                 ha='center',
-#                 va=va,
-#                 fontsize=7.5,
-#                 rotation=rotation,
-#                 rotation_mode="anchor",
-#                 fontweight='bold',
-#                 color='#444444',
-#                 zorder=13,
-#                 family='sans-serif'
-#             )
-
+# 数据集标签已注释掉，用户将在PPT中手动添加
+# (与fig1保持一致，方便PPT集成)
 
 # ======================
 # 7. 图例（排成一行）
@@ -222,10 +214,10 @@ except (FileNotFoundError, OSError):
 ax.legend(
     loc="lower center",
     bbox_to_anchor=(0.5, -0.15),
-    ncol=5,  # 5个模型排成一行
+    ncol=3,  # 3个模型排成一行
     frameon=False
 )
 
 plt.tight_layout()
-plt.savefig("fig1.png", dpi=300, bbox_inches="tight")
+plt.savefig("fig2.png", dpi=300, bbox_inches="tight")
 plt.show()
