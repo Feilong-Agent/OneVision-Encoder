@@ -103,6 +103,7 @@ circle = plt.Circle((0, 0), radial_start - 3, transform=ax.transData._b, color="
 ax.add_artist(circle)
 
 # 加载并显示图片在中间
+# 注意：需要在当前目录下提供 intro_tem.jpg 图片文件
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 
 try:
