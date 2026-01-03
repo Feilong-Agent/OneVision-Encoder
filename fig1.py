@@ -10,11 +10,12 @@ benchmarks = [
     "Epic_Verb", "Epic_Noun", "K400", "HMDB51"
 ]
 
-# 每个 benchmark 对应 4 个模型的分数
+# 每个 benchmark 对应 5 个模型的分数
 scores = {
     "MetaCLIP2": [45.9, 30.7, 46.4, 10.2, 44.4, 36.6, 79.1, 77.0],
     "DINOv3": [56.1, 50.7, 58.1, 12.4, 60.0, 47.9, 81.4, 81.4],
     "SigLIP2": [57.9, 53.2, 56.3, 12.8, 58.8, 45.2, 81.3, 82.1],
+    "AIMv2": [53.8, 45.3, 52.9, 11.5, 54.4, 42.7, 79.0, 81.5],
     "OV-Encoder": [57.0, 56.0, 57.7, 12.4, 61.9, 53.3, 84.1, 82.2],
 }
 
@@ -30,6 +31,7 @@ colors = {
     "MetaCLIP2": "#B7DDB0",    # 浅绿
     "DINOv3": "#F6D8B8",       # 米色
     "SigLIP2": "#F39AC1",      # 粉色
+    "AIMv2": "#C8A2C8",        # 淡紫色
 }
 
 # ======================
@@ -52,6 +54,17 @@ ax.grid(False)  # 去掉网格线
 radial_start = 35  # 柱状图起始位置（内圈半径）
 radial_end = 75    # 柱状图结束位置（缩短长度）
 
+# 计算所有数据的最小值和最大值，用于智能缩放
+all_values = []
+for v in scores.values():
+    all_values.extend(v)
+min_val = min(all_values)
+max_val = max(all_values)
+
+# 使用基线缩放：将最小值映射到30%的高度，最大值映射到100%
+# 这样即使小数值也能清晰显示
+baseline_ratio = 0.3  # 最小值显示为30%高度
+
 # ======================
 # 4. 画 bars（缩短后的柱状图）
 # ======================
@@ -59,8 +72,10 @@ for i, model in enumerate(models):
     values = scores[model]
     offset = (i - (num_models - 1) / 2) * bar_width
     
-    # 将原始分数映射到缩短的范围
-    scaled_values = (np.array(values) / 100.0) * (radial_end - radial_start)
+    # 将原始分数映射到缩短的范围，使用基线缩放
+    # 公式：scaled = baseline_ratio + (value - min) / (max - min) * (1 - baseline_ratio)
+    normalized_values = (np.array(values) - min_val) / (max_val - min_val)
+    scaled_values = (baseline_ratio + normalized_values * (1 - baseline_ratio)) * (radial_end - radial_start)
 
     bars = ax.bar(
         angles + offset,
