@@ -45,67 +45,106 @@ ax = plt.subplot(111, polar=True)
 ax.set_theta_offset(np.pi / 2)
 ax.set_theta_direction(-1)
 
+# 设置径向范围，从较大的值开始，缩短柱状图
+radial_start = 35  # 柱状图起始位置（内圈半径）
+radial_end = 75    # 柱状图结束位置（缩短长度）
+
 # ======================
-# 4. 画 bars
+# 4. 画 bars（缩短后的柱状图）
 # ======================
 for i, model in enumerate(models):
     values = scores[model]
     offset = (i - (num_models - 1) / 2) * bar_width
+    
+    # 将原始分数映射到缩短的范围
+    scaled_values = radial_start + (np.array(values) / 100.0) * (radial_end - radial_start)
 
     bars = ax.bar(
         angles + offset,
-        values,
+        scaled_values,
         width=bar_width * 0.9,
+        bottom=0,  # 从0开始
         color=colors[model],
         edgecolor="none",
         alpha=0.95,
         label=model
     )
 
-    # 数值标注
-    for angle, val in zip(angles + offset, values):
+    # 数值标注（在柱状图顶部稍外）
+    for angle, val, scaled_val in zip(angles + offset, values, scaled_values):
         ax.text(
             angle,
-            val + 2,
+            scaled_val + 1.5,
             f"{val:.1f}",
             ha="center",
             va="center",
-            fontsize=8,
+            fontsize=7,
             rotation=np.degrees(angle),
             rotation_mode="anchor"
         )
 
 # ======================
-# 5. benchmark 标签
+# 5. benchmark 标签（放在内圈）
 # ======================
 ax.set_xticks(angles)
-ax.set_xticklabels(benchmarks, fontsize=10)
+# 将标签设置为空，我们手动添加到内圈
+ax.set_xticklabels([])
+
+# 先不添加标签，等白色圆圈画完后再添加（确保标签在上层）
 
 ax.set_yticks([])
-ax.set_ylim(0, 100)
+ax.set_ylim(0, radial_end + 10)  # 调整y轴范围
 
 # ======================
-# 6. 中心留白（放 logo）
+# 6. 中心留白（放 logo）- 增大内圈
 # ======================
-circle = plt.Circle((0, 0), 15, transform=ax.transData._b, color="white", zorder=10)
+# 增大中心圆，覆盖更大区域
+circle = plt.Circle((0, 0), radial_start - 3, transform=ax.transData._b, color="white", zorder=10)
 ax.add_artist(circle)
 
-ax.text(
-    0, 0,
-    "Qwen",
-    ha="center",
-    va="center",
-    fontsize=18,
-    fontweight="bold",
-    zorder=11
-)
-
+# 加载并显示图片在中间
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 
-img = plt.imread("intro_tem.jpg")
-imagebox = OffsetImage(img, zoom=0.15)
-ab = AnnotationBbox(imagebox, (0, 0), frameon=False)
-ax.add_artist(ab)
+try:
+    img = plt.imread("intro_tem.jpg")
+    # 调整zoom以适配更大的中心区域，稍微缩小避免遮挡标签
+    imagebox = OffsetImage(img, zoom=0.18)
+    ab = AnnotationBbox(imagebox, (0, 0), frameon=False, zorder=11)
+    ax.add_artist(ab)
+except Exception as e:
+    # 如果图片加载失败，显示备用文本
+    ax.text(
+        0, 0,
+        "OneVision\nEncoder",
+        ha="center",
+        va="center",
+        fontsize=16,
+        fontweight="bold",
+        zorder=11
+    )
+
+# 现在在白色圆圈外围添加标签（在柱状图起始位置）
+label_radius = radial_start + 1  # 标签在柱状图起始位置的稍内侧
+for angle, benchmark in zip(angles, benchmarks):
+    # 计算标签位置
+    rotation = np.degrees(angle)
+    # 调整文字旋转使其可读
+    if rotation > 90 and rotation < 270:
+        rotation = rotation + 180
+    
+    ax.text(
+        angle,
+        label_radius,
+        benchmark,
+        ha='center',
+        va='center',
+        fontsize=9,
+        rotation=rotation,
+        rotation_mode="anchor",
+        fontweight='bold',
+        color='black',
+        zorder=12  # 确保在最上层
+    )
 
 
 # ======================
