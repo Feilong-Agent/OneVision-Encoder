@@ -168,60 +168,61 @@ except (FileNotFoundError, OSError):
 
 # 现在在白色圆圈外围添加标签（在柱状图起始位置）
 # 为每个数据集添加弧线标记和弧形文字
-arc_radius = radial_start - 6  # 弧线位置
-label_radius = radial_start - 9  # 文字在弧线下方
-
-for angle, benchmark in zip(angles, benchmarks):
-    # 计算每个benchmark占据的角度范围
-    arc_width = 2 * np.pi / num_bench * 0.7  # 弧线宽度
-    
-    # 绘制弧线
-    arc_angles = np.linspace(angle - arc_width/2, angle + arc_width/2, 50)
-    arc_x = arc_angles
-    arc_y = np.full_like(arc_angles, arc_radius)
-    ax.plot(arc_x, arc_y, color='#999999', linewidth=2, alpha=0.5, zorder=12)
-    
-    # 将文字按弧形排列（每个字符单独放置）
-    text_len = len(benchmark)
-    if text_len > 0:
-        # 计算字符间距，使文字沿着弧线分布
-        char_arc_width = arc_width * 0.75  # 字符占用的弧线宽度
-        char_angles = np.linspace(angle - char_arc_width/2, angle + char_arc_width/2, text_len)
-        
-        for char_angle, char in zip(char_angles, benchmark):
-            # 计算每个字符的旋转角度
-            rotation = np.degrees(char_angle)
-            
-            # 调整文字旋转使其沿着弧线方向，且可读
-            if 90 < rotation < 270:
-                rotation = rotation + 180
-                va = 'top'
-            else:
-                va = 'bottom'
-            
-            ax.text(
-                char_angle,
-                label_radius,
-                char,
-                ha='center',
-                va=va,
-                fontsize=7.5,
-                rotation=rotation,
-                rotation_mode="anchor",
-                fontweight='bold',
-                color='#444444',
-                zorder=13,
-                family='sans-serif'
-            )
+# 注释掉数据集标签，用户将在PPT中手动添加
+# arc_radius = radial_start - 6  # 弧线位置
+# label_radius = radial_start - 9  # 文字在弧线下方
+# 
+# for angle, benchmark in zip(angles, benchmarks):
+#     # 计算每个benchmark占据的角度范围
+#     arc_width = 2 * np.pi / num_bench * 0.7  # 弧线宽度
+#     
+#     # 绘制弧线
+#     arc_angles = np.linspace(angle - arc_width/2, angle + arc_width/2, 50)
+#     arc_x = arc_angles
+#     arc_y = np.full_like(arc_angles, arc_radius)
+#     ax.plot(arc_x, arc_y, color='#999999', linewidth=2, alpha=0.5, zorder=12)
+#     
+#     # 将文字按弧形排列（每个字符单独放置）
+#     text_len = len(benchmark)
+#     if text_len > 0:
+#         # 计算字符间距，使文字沿着弧线分布
+#         char_arc_width = arc_width * 0.75  # 字符占用的弧线宽度
+#         char_angles = np.linspace(angle - char_arc_width/2, angle + char_arc_width/2, text_len)
+#         
+#         for char_angle, char in zip(char_angles, benchmark):
+#             # 计算每个字符的旋转角度
+#             rotation = np.degrees(char_angle)
+#             
+#             # 调整文字旋转使其沿着弧线方向，且可读
+#             if 90 < rotation < 270:
+#                 rotation = rotation + 180
+#                 va = 'top'
+#             else:
+#                 va = 'bottom'
+#             
+#             ax.text(
+#                 char_angle,
+#                 label_radius,
+#                 char,
+#                 ha='center',
+#                 va=va,
+#                 fontsize=7.5,
+#                 rotation=rotation,
+#                 rotation_mode="anchor",
+#                 fontweight='bold',
+#                 color='#444444',
+#                 zorder=13,
+#                 family='sans-serif'
+#             )
 
 
 # ======================
-# 7. 图例
+# 7. 图例（排成一行）
 # ======================
 ax.legend(
     loc="lower center",
     bbox_to_anchor=(0.5, -0.15),
-    ncol=2,
+    ncol=5,  # 5个模型排成一行
     frameon=False
 )
 
