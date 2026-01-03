@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 
 # ======================
 # 1. 数据（示例，可替换）
@@ -57,13 +58,13 @@ for i, model in enumerate(models):
     offset = (i - (num_models - 1) / 2) * bar_width
     
     # 将原始分数映射到缩短的范围
-    scaled_values = radial_start + (np.array(values) / 100.0) * (radial_end - radial_start)
+    scaled_values = (np.array(values) / 100.0) * (radial_end - radial_start)
 
     bars = ax.bar(
         angles + offset,
         scaled_values,
         width=bar_width * 0.9,
-        bottom=0,  # 从0开始
+        bottom=radial_start,  # 从radial_start开始，而不是从0
         color=colors[model],
         edgecolor="none",
         alpha=0.95,
@@ -74,7 +75,7 @@ for i, model in enumerate(models):
     for angle, val, scaled_val in zip(angles + offset, values, scaled_values):
         ax.text(
             angle,
-            scaled_val + 1.5,
+            radial_start + scaled_val + 1.5,  # 调整位置基于radial_start
             f"{val:.1f}",
             ha="center",
             va="center",
@@ -104,7 +105,6 @@ ax.add_artist(circle)
 
 # 加载并显示图片在中间
 # 注意：需要在当前目录下提供 intro_tem.jpg 图片文件
-from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 
 try:
     img = plt.imread("intro_tem.jpg")
@@ -112,7 +112,7 @@ try:
     imagebox = OffsetImage(img, zoom=0.18)
     ab = AnnotationBbox(imagebox, (0, 0), frameon=False, zorder=11)
     ax.add_artist(ab)
-except Exception as e:
+except (FileNotFoundError, OSError) as e:
     # 如果图片加载失败，显示备用文本
     ax.text(
         0, 0,
