@@ -6,18 +6,16 @@ from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 # 1. 数据（示例，可替换）
 # ======================
 benchmarks = [
-    "MathVista", "MathVision", "MMMU", "MME",
-    "VideoMME", "LCBenchV6", "AI2D",
-    "MMMU-Pro", "RealWorldQA", "ERA",
-    "DesignCode", "MMBench"
+    "SSV2", "Diving48", "Perception Test", "CharadesEgo",
+    "Epic_Verb", "Epic_Noun", "K400", "HMDB51"
 ]
 
 # 每个 benchmark 对应 4 个模型的分数
 scores = {
-    "Model-A": [50.9, 66.5, 57.0, 79.2, 79.2, 54.3, 74.7, 84.9, 92.0, 51.3, 79.2, 57.0],
-    "Model-B": [74.5, 57.7, 51.2, 80.9, 80.6, 51.8, 70.3, 77.7, 90.3, 50.3, 76.0, 51.2],
-    "Model-C": [77.7, 66.0, 48.1, 78.7, 77.3, 45.2, 46.6, 74.5, 88.9, 42.0, 77.3, 48.1],
-    "Model-D": [84.9, 45.8, 42.4, 74.4, 73.3, 44.6, 33.9, 50.9, 85.3, 28.0, 68.5, 42.4],
+    "MetaCLIP2": [45.9, 30.7, 46.4, 10.2, 44.4, 36.6, 79.1, 77.0],
+    "DINOv3": [56.1, 50.7, 58.1, 12.4, 60.0, 47.9, 81.4, 81.4],
+    "SigLIP2": [57.9, 53.2, 56.3, 12.8, 58.8, 45.2, 81.3, 82.1],
+    "OV-Encoder": [57.0, 56.0, 57.7, 12.4, 61.9, 53.3, 84.1, 82.2],
 }
 
 models = list(scores.keys())
@@ -28,10 +26,10 @@ num_bench = len(benchmarks)
 # 2. 统一配色（重点）
 # ======================
 colors = {
-    "Model-A": "#5B5BD6",   # 蓝紫
-    "Model-B": "#B7DDB0",   # 浅绿
-    "Model-C": "#F6D8B8",   # 米色
-    "Model-D": "#F39AC1",   # 粉色
+    "OV-Encoder": "#5B5BD6",   # 蓝紫 (OV-Encoder是蓝色)
+    "MetaCLIP2": "#B7DDB0",    # 浅绿
+    "DINOv3": "#F6D8B8",       # 米色
+    "SigLIP2": "#F39AC1",      # 粉色
 }
 
 # ======================
@@ -81,8 +79,8 @@ for i, model in enumerate(models):
         # 将数值放在柱状图顶端（接近radial_start + scaled_val）
         text_radius = radial_start + scaled_val * 0.85  # 在顶端85%位置
         
-        # 根据模型选择文字颜色：Model-A用白色，其他用黑色
-        if model == "Model-A":
+        # 根据模型选择文字颜色：OV-Encoder用白色，其他用黑色
+        if model == "OV-Encoder":
             text_color = 'white'
         else:
             text_color = 'black'
