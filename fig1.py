@@ -87,6 +87,15 @@ for i, model in enumerate(models):
         else:
             text_color = 'black'
         
+        # 计算旋转角度，使文字完全沿着柱状方向
+        text_rotation = np.degrees(angle)
+        
+        # 调整旋转方向使文字始终可读
+        if 90 < text_rotation < 270:
+            text_rotation = text_rotation - 90  # 向内旋转
+        else:
+            text_rotation = text_rotation + 90  # 向外旋转
+        
         ax.text(
             angle,
             text_radius,
@@ -94,7 +103,7 @@ for i, model in enumerate(models):
             ha="center",
             va="center",
             fontsize=6.5,
-            rotation=np.degrees(angle),
+            rotation=text_rotation,
             rotation_mode="anchor",
             color=text_color,
             fontweight='bold'
@@ -141,7 +150,7 @@ except (FileNotFoundError, OSError):
     )
 
 # 现在在白色圆圈外围添加标签（在柱状图起始位置）
-# 为每个数据集添加弧线标记和标签文字
+# 为每个数据集添加弧线标记和弧形文字
 arc_radius = radial_start - 6  # 弧线位置
 label_radius = radial_start - 9  # 文字在弧线下方
 
@@ -155,30 +164,38 @@ for angle, benchmark in zip(angles, benchmarks):
     arc_y = np.full_like(arc_angles, arc_radius)
     ax.plot(arc_x, arc_y, color='#999999', linewidth=2, alpha=0.5, zorder=12)
     
-    # 将整个标签文字放置在弧线下方（不再拆分字符）
-    rotation = np.degrees(angle)
-    
-    # 调整文字旋转使其可读
-    if 90 < rotation < 270:
-        rotation = rotation + 180
-        va = 'top'
-    else:
-        va = 'bottom'
-    
-    ax.text(
-        angle,
-        label_radius,
-        benchmark,
-        ha='center',
-        va=va,
-        fontsize=8,
-        rotation=rotation,
-        rotation_mode="anchor",
-        fontweight='bold',
-        color='#444444',
-        zorder=13,
-        family='sans-serif'  # 使用无衬线字体确保清晰
-    )
+    # 将文字按弧形排列（每个字符单独放置）
+    text_len = len(benchmark)
+    if text_len > 0:
+        # 计算字符间距，使文字沿着弧线分布
+        char_arc_width = arc_width * 0.75  # 字符占用的弧线宽度
+        char_angles = np.linspace(angle - char_arc_width/2, angle + char_arc_width/2, text_len)
+        
+        for char_angle, char in zip(char_angles, benchmark):
+            # 计算每个字符的旋转角度
+            rotation = np.degrees(char_angle)
+            
+            # 调整文字旋转使其沿着弧线方向，且可读
+            if 90 < rotation < 270:
+                rotation = rotation + 180
+                va = 'top'
+            else:
+                va = 'bottom'
+            
+            ax.text(
+                char_angle,
+                label_radius,
+                char,
+                ha='center',
+                va=va,
+                fontsize=7.5,
+                rotation=rotation,
+                rotation_mode="anchor",
+                fontweight='bold',
+                color='#444444',
+                zorder=13,
+                family='sans-serif'
+            )
 
 
 # ======================
