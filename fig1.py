@@ -46,6 +46,10 @@ ax = plt.subplot(111, polar=True)
 ax.set_theta_offset(np.pi / 2)
 ax.set_theta_direction(-1)
 
+# 去掉边框和网格线
+ax.spines['polar'].set_visible(False)  # 去掉圆形边框
+ax.grid(False)  # 去掉网格线
+
 # 设置径向范围，从较大的值开始，缩短柱状图
 radial_start = 35  # 柱状图起始位置（内圈半径）
 radial_end = 75    # 柱状图结束位置（缩短长度）
@@ -66,22 +70,27 @@ for i, model in enumerate(models):
         width=bar_width * 0.9,
         bottom=radial_start,  # 从radial_start开始，而不是从0
         color=colors[model],
-        edgecolor="none",
+        edgecolor="white",  # 浅色边框
+        linewidth=0.5,
         alpha=0.95,
         label=model
     )
 
-    # 数值标注（在柱状图顶部稍外）
+    # 数值标注（在柱状图内部，沿着柱状方向）
     for angle, val, scaled_val in zip(angles + offset, values, scaled_values):
+        # 将数值放在柱状图中间位置
+        text_radius = radial_start + scaled_val / 2
         ax.text(
             angle,
-            radial_start + scaled_val + 1.5,  # 调整位置基于radial_start
+            text_radius,
             f"{val:.1f}",
             ha="center",
             va="center",
-            fontsize=7,
+            fontsize=6.5,
             rotation=np.degrees(angle),
-            rotation_mode="anchor"
+            rotation_mode="anchor",
+            color='white',
+            fontweight='bold'
         )
 
 # ======================
@@ -125,27 +134,51 @@ except (FileNotFoundError, OSError):
     )
 
 # 现在在白色圆圈外围添加标签（在柱状图起始位置）
-label_radius = radial_start + 1  # 标签在柱状图起始位置的稍内侧
+# 为每个数据集添加弧线标记和弧形文字
+arc_radius = radial_start - 6  # 弧线位置
+label_radius = radial_start - 9  # 文字在弧线下方
+
 for angle, benchmark in zip(angles, benchmarks):
-    # 计算标签位置
-    rotation = np.degrees(angle)
-    # 调整文字旋转使其可读
-    if 90 < rotation < 270:
-        rotation = rotation + 180
+    # 计算每个benchmark占据的角度范围
+    arc_width = 2 * np.pi / num_bench * 0.7  # 弧线宽度
     
-    ax.text(
-        angle,
-        label_radius,
-        benchmark,
-        ha='center',
-        va='center',
-        fontsize=9,
-        rotation=rotation,
-        rotation_mode="anchor",
-        fontweight='bold',
-        color='black',
-        zorder=12  # 确保在最上层
-    )
+    # 绘制弧线
+    arc_angles = np.linspace(angle - arc_width/2, angle + arc_width/2, 50)
+    arc_x = arc_angles
+    arc_y = np.full_like(arc_angles, arc_radius)
+    ax.plot(arc_x, arc_y, color='#999999', linewidth=2, alpha=0.5, zorder=12)
+    
+    # 沿着弧线放置文字（弧形排列）
+    text_len = len(benchmark)
+    if text_len > 0:
+        # 为每个字符计算位置，使字符间距更紧密
+        char_spacing = arc_width * 0.6 / max(text_len, 1)
+        start_angle = angle - (text_len - 1) * char_spacing / 2
+        
+        for i, char in enumerate(benchmark):
+            char_angle = start_angle + i * char_spacing
+            rotation = np.degrees(char_angle)
+            
+            # 调整文字旋转使其可读
+            if 90 < rotation < 270:
+                rotation = rotation + 180
+                va = 'top'
+            else:
+                va = 'bottom'
+            
+            ax.text(
+                char_angle,
+                label_radius,
+                char,
+                ha='center',
+                va=va,
+                fontsize=7.5,
+                rotation=rotation,
+                rotation_mode="anchor",
+                fontweight='bold',
+                color='#444444',
+                zorder=13
+            )
 
 
 # ======================
