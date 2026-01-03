@@ -76,10 +76,17 @@ for i, model in enumerate(models):
         label=model
     )
 
-    # 数值标注（在柱状图内部，沿着柱状方向）
+    # 数值标注（在柱状图内部顶端，沿着柱状方向）
     for angle, val, scaled_val in zip(angles + offset, values, scaled_values):
-        # 将数值放在柱状图中间位置
-        text_radius = radial_start + scaled_val / 2
+        # 将数值放在柱状图顶端（接近radial_start + scaled_val）
+        text_radius = radial_start + scaled_val * 0.85  # 在顶端85%位置
+        
+        # 根据模型选择文字颜色：Model-A用白色，其他用黑色
+        if model == "Model-A":
+            text_color = 'white'
+        else:
+            text_color = 'black'
+        
         ax.text(
             angle,
             text_radius,
@@ -89,7 +96,7 @@ for i, model in enumerate(models):
             fontsize=6.5,
             rotation=np.degrees(angle),
             rotation_mode="anchor",
-            color='white',
+            color=text_color,
             fontweight='bold'
         )
 
@@ -117,8 +124,8 @@ ax.add_artist(circle)
 
 try:
     img = plt.imread("intro_tem.jpg")
-    # 调整zoom以适配更大的中心区域，稍微缩小避免遮挡标签
-    imagebox = OffsetImage(img, zoom=0.18)
+    # 增大zoom以让中心图片更大
+    imagebox = OffsetImage(img, zoom=0.25)
     ab = AnnotationBbox(imagebox, (0, 0), frameon=False, zorder=11)
     ax.add_artist(ab)
 except (FileNotFoundError, OSError):
@@ -128,13 +135,13 @@ except (FileNotFoundError, OSError):
         "OneVision\nEncoder",
         ha="center",
         va="center",
-        fontsize=16,
+        fontsize=18,
         fontweight="bold",
         zorder=11
     )
 
 # 现在在白色圆圈外围添加标签（在柱状图起始位置）
-# 为每个数据集添加弧线标记和弧形文字
+# 为每个数据集添加弧线标记和标签文字
 arc_radius = radial_start - 6  # 弧线位置
 label_radius = radial_start - 9  # 文字在弧线下方
 
@@ -148,37 +155,30 @@ for angle, benchmark in zip(angles, benchmarks):
     arc_y = np.full_like(arc_angles, arc_radius)
     ax.plot(arc_x, arc_y, color='#999999', linewidth=2, alpha=0.5, zorder=12)
     
-    # 沿着弧线放置文字（弧形排列）
-    text_len = len(benchmark)
-    if text_len > 0:
-        # 为每个字符计算位置，使字符间距更紧密
-        char_spacing = arc_width * 0.6 / max(text_len, 1)
-        start_angle = angle - (text_len - 1) * char_spacing / 2
-        
-        for i, char in enumerate(benchmark):
-            char_angle = start_angle + i * char_spacing
-            rotation = np.degrees(char_angle)
-            
-            # 调整文字旋转使其可读
-            if 90 < rotation < 270:
-                rotation = rotation + 180
-                va = 'top'
-            else:
-                va = 'bottom'
-            
-            ax.text(
-                char_angle,
-                label_radius,
-                char,
-                ha='center',
-                va=va,
-                fontsize=7.5,
-                rotation=rotation,
-                rotation_mode="anchor",
-                fontweight='bold',
-                color='#444444',
-                zorder=13
-            )
+    # 将整个标签文字放置在弧线下方（不再拆分字符）
+    rotation = np.degrees(angle)
+    
+    # 调整文字旋转使其可读
+    if 90 < rotation < 270:
+        rotation = rotation + 180
+        va = 'top'
+    else:
+        va = 'bottom'
+    
+    ax.text(
+        angle,
+        label_radius,
+        benchmark,
+        ha='center',
+        va=va,
+        fontsize=8,
+        rotation=rotation,
+        rotation_mode="anchor",
+        fontweight='bold',
+        color='#444444',
+        zorder=13,
+        family='sans-serif'  # 使用无衬线字体确保清晰
+    )
 
 
 # ======================
