@@ -21,9 +21,9 @@ image_benchmarks = [
 benchmarks = video_benchmarks + image_benchmarks
 
 # 每个 benchmark 对应的模型分数（使用Qwen3-4B的数据）
+# 将OV-ViT-Codec改名为OV-Encoder，移除OV-ViT
 scores = {
-    "OV-ViT-Codec": [51.9, 44.7, 74.6, 54.6, 60.4, 21.2, 50.4, 78.6, 79.7, 44.8, 78.5, 617, None, 52.8, 61.7],
-    "OV-ViT": [49.8, 49.4, 71.9, 49.3, 56.7, 21.8, 45.5, 77.8, 79.5, 45.5, 78.5, 630.0, 26.1, 54.3, 61.2],
+    "OV-Encoder": [51.9, 44.7, 74.6, 54.6, 60.4, 21.2, 50.4, 78.6, 79.7, 44.8, 78.5, 617, None, 52.8, 61.7],
     "SigLIP2": [47.2, 48.4, 70.6, 46.8, 56.0, 22.3, 45.2, 76.4, 75.0, 42.0, 79.6, 621.0, 26.1, 55.0, 62.1],
 }
 
@@ -38,9 +38,8 @@ num_bench = len(benchmarks)
 # 2. 统一配色（与fig1保持一致的风格）
 # ======================
 colors = {
-    "OV-ViT-Codec": "#5B5BD6",   # 蓝紫 (主要方法)
-    "OV-ViT": "#B7DDB0",          # 浅绿
-    "SigLIP2": "#F39AC1",         # 粉色
+    "OV-Encoder": "#5B5BD6",   # 蓝紫 (主要方法，与fig1的OV-Encoder一致)
+    "SigLIP2": "#F39AC1",      # 粉色
 }
 
 # ======================
@@ -131,8 +130,8 @@ for i, model in enumerate(models):
         # 将数值放在柱状图顶端（接近radial_start + scaled_val）
         text_radius = radial_start + scaled_val * 0.85  # 在顶端85%位置
         
-        # 根据模型选择文字颜色：OV-ViT-Codec用白色，其他用黑色
-        if model == "OV-ViT-Codec":
+        # 根据模型选择文字颜色：OV-Encoder用白色，其他用黑色
+        if model == "OV-Encoder":
             text_color = 'white'
         else:
             text_color = 'black'
@@ -176,6 +175,117 @@ ax.set_yticks([])
 ax.set_ylim(0, radial_end + 10)
 
 # ======================
+# 5.5. 数据集标签（弧形摆放）和类别图标
+# ======================
+# 添加弧形数据集标签
+arc_radius = radial_start - 6  # 弧线位置
+label_radius = radial_start - 9  # 文字在弧线下方
+
+for angle, benchmark in zip(angles, benchmarks):
+    # 计算每个benchmark占据的角度范围
+    arc_width = 2 * np.pi / num_bench * 0.7  # 弧线宽度
+    
+    # 绘制弧线
+    arc_angles = np.linspace(angle - arc_width/2, angle + arc_width/2, 50)
+    arc_x = arc_angles
+    arc_y = np.full_like(arc_angles, arc_radius)
+    ax.plot(arc_x, arc_y, color='#999999', linewidth=2, alpha=0.5, zorder=12)
+    
+    # 将文字按弧形排列（每个字符单独放置）
+    text_len = len(benchmark)
+    if text_len > 0:
+        # 计算字符间距，使文字沿着弧线分布
+        char_arc_width = arc_width * 0.75  # 字符占用的弧线宽度
+        char_angles = np.linspace(angle - char_arc_width/2, angle + char_arc_width/2, text_len)
+        
+        for char_angle, char in zip(char_angles, benchmark):
+            # 计算每个字符的旋转角度
+            rotation = np.degrees(char_angle)
+            
+            # 调整文字旋转使其沿着弧线方向，且可读
+            if 90 < rotation < 270:
+                rotation = rotation + 180
+                va = 'top'
+            else:
+                va = 'bottom'
+            
+            ax.text(
+                char_angle,
+                label_radius,
+                char,
+                ha='center',
+                va=va,
+                fontsize=7.5,
+                rotation=rotation,
+                rotation_mode="anchor",
+                fontweight='bold',
+                color='#444444',
+                zorder=13,
+                family='sans-serif'
+            )
+
+# 添加类别图标/标记 (Video, Image, Document)
+# Video任务: 前7个 (indices 0-6)
+# Image任务: 后8个，其中前5个是图表类 (indices 7-11)  
+# Document任务: OCRBench, OCRBench v2 (indices 11-12) - 文档类
+# 其余Image任务: MMStar, RealWorldQA (indices 13-14)
+
+# 计算各类别的中心角度
+video_center_angle = np.mean([angles[i] for i in range(7)])  # Video: 0-6
+image_chart_center_angle = np.mean([angles[i] for i in range(7, 11)])  # 图表Image: 7-10
+document_center_angle = np.mean([angles[i] for i in [11, 12]])  # Document: 11-12
+image_other_center_angle = np.mean([angles[i] for i in [13, 14]])  # 其他Image: 13-14
+
+# 在外圈添加类别标识
+category_radius = radial_end + 5
+category_fontsize = 10
+
+# Video图标 (使用文字标识)
+ax.text(
+    video_center_angle,
+    category_radius,
+    "[VIDEO]",
+    ha='center',
+    va='center',
+    fontsize=category_fontsize,
+    fontweight='bold',
+    color='#5B5BD6',
+    zorder=15,
+    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor='#5B5BD6', linewidth=2)
+)
+
+# Image图标
+# 合并所有Image相关的中心角度
+all_image_indices = list(range(7, 11)) + [13, 14]
+image_center_angle = np.mean([angles[i] for i in all_image_indices])
+ax.text(
+    image_center_angle,
+    category_radius,
+    "[IMAGE]",
+    ha='center',
+    va='center',
+    fontsize=category_fontsize,
+    fontweight='bold',
+    color='#F39AC1',
+    zorder=15,
+    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor='#F39AC1', linewidth=2)
+)
+
+# Document图标
+ax.text(
+    document_center_angle,
+    category_radius,
+    "[DOC]",
+    ha='center',
+    va='center',
+    fontsize=category_fontsize,
+    fontweight='bold',
+    color='#666666',
+    zorder=15,
+    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor='#666666', linewidth=2)
+)
+
+# ======================
 # 6. 中间白色圆圈 + 图片
 # ======================
 white_circle = plt.Circle(
@@ -214,7 +324,7 @@ except (FileNotFoundError, OSError):
 ax.legend(
     loc="lower center",
     bbox_to_anchor=(0.5, -0.15),
-    ncol=3,  # 3个模型排成一行
+    ncol=2,  # 2个模型排成一行
     frameon=False
 )
 
