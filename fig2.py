@@ -237,9 +237,9 @@ categories = [
     {"name": "Image", "start": 13, "end": 15, "color": "#F39AC1"},
 ]
 
-# 绘制类别分隔半弧
-arc_outer_radius = radial_end + 8
-arc_inner_radius = radial_end + 4
+# 绘制类别分隔半弧（放在圆圈内部，接近数据集标签）
+arc_outer_radius = 26
+arc_inner_radius = 23
 
 for category in categories:
     start_idx = category["start"]
@@ -256,26 +256,26 @@ for category in categories:
     
     # 外弧
     ax.plot(arc_angles, np.full_like(arc_angles, arc_outer_radius), 
-            color=color, linewidth=3, alpha=0.8, zorder=14)
+            color=color, linewidth=1.5, alpha=0.7, zorder=11)
     
     # 内弧
     ax.plot(arc_angles, np.full_like(arc_angles, arc_inner_radius), 
-            color=color, linewidth=3, alpha=0.8, zorder=14)
+            color=color, linewidth=1.5, alpha=0.7, zorder=11)
     
     # 连接两端
     ax.plot([start_angle, start_angle], [arc_inner_radius, arc_outer_radius], 
-            color=color, linewidth=3, alpha=0.8, zorder=14)
+            color=color, linewidth=1.5, alpha=0.7, zorder=11)
     ax.plot([end_angle, end_angle], [arc_inner_radius, arc_outer_radius], 
-            color=color, linewidth=3, alpha=0.8, zorder=14)
+            color=color, linewidth=1.5, alpha=0.7, zorder=11)
     
-    # 在半弧中心位置添加类别名称
+    # 在半弧中心位置添加类别名称（内圈，较小字体）
     center_angle = (start_angle + end_angle) / 2
-    text_radius = arc_outer_radius + 2
+    text_radius = (arc_inner_radius + arc_outer_radius) / 2  # 在内外弧之间
     
     # 计算文字旋转角度
-    text_rotation = np.degrees(center_angle)
-    if 90 < text_rotation < 270:
-        text_rotation = text_rotation + 180
+    text_rotation = np.degrees(center_angle) - 90
+    if 90 < np.degrees(center_angle) < 270:
+        text_rotation = np.degrees(center_angle) + 90
     
     ax.text(
         center_angle,
@@ -283,7 +283,7 @@ for category in categories:
         name,
         ha='center',
         va='center',
-        fontsize=9,
+        fontsize=7,  # 更小的字体
         fontweight='bold',
         color=color,
         rotation=text_rotation,
