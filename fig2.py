@@ -224,66 +224,72 @@ for angle, benchmark in zip(angles, benchmarks):
                 family='sans-serif'
             )
 
-# 添加类别图标/标记 (Video, Image, Document)
+# 添加类别分隔（使用半弧线代替图标）
 # Video任务: 前7个 (indices 0-6)
-# Image任务: 后8个，其中前5个是图表类 (indices 7-11)  
-# Document任务: OCRBench, OCRBench v2 (indices 11-12) - 文档类
-# 其余Image任务: MMStar, RealWorldQA (indices 13-14)
+# Image任务: indices 7-10, 13-14 (共6个)
+# Document任务: OCRBench, OCRBench v2 (indices 11-12)
 
-# 计算各类别的中心角度
-video_center_angle = np.mean([angles[i] for i in range(7)])  # Video: 0-6
-image_chart_center_angle = np.mean([angles[i] for i in range(7, 11)])  # 图表Image: 7-10
-document_center_angle = np.mean([angles[i] for i in [11, 12]])  # Document: 11-12
-image_other_center_angle = np.mean([angles[i] for i in [13, 14]])  # 其他Image: 13-14
+# 定义类别边界和颜色
+categories = [
+    {"name": "Video", "start": 0, "end": 7, "color": "#5B5BD6"},
+    {"name": "Image", "start": 7, "end": 11, "color": "#F39AC1"},
+    {"name": "Document", "start": 11, "end": 13, "color": "#999999"},
+    {"name": "Image", "start": 13, "end": 15, "color": "#F39AC1"},
+]
 
-# 在外圈添加类别标识
-category_radius = radial_end + 5
-category_fontsize = 10
+# 绘制类别分隔半弧
+arc_outer_radius = radial_end + 8
+arc_inner_radius = radial_end + 4
 
-# Video图标 (使用文字标识)
-ax.text(
-    video_center_angle,
-    category_radius,
-    "[VIDEO]",
-    ha='center',
-    va='center',
-    fontsize=category_fontsize,
-    fontweight='bold',
-    color='#5B5BD6',
-    zorder=15,
-    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor='#5B5BD6', linewidth=2)
-)
-
-# Image图标
-# 合并所有Image相关的中心角度
-all_image_indices = list(range(7, 11)) + [13, 14]
-image_center_angle = np.mean([angles[i] for i in all_image_indices])
-ax.text(
-    image_center_angle,
-    category_radius,
-    "[IMAGE]",
-    ha='center',
-    va='center',
-    fontsize=category_fontsize,
-    fontweight='bold',
-    color='#F39AC1',
-    zorder=15,
-    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor='#F39AC1', linewidth=2)
-)
-
-# Document图标
-ax.text(
-    document_center_angle,
-    category_radius,
-    "[DOC]",
-    ha='center',
-    va='center',
-    fontsize=category_fontsize,
-    fontweight='bold',
-    color='#666666',
-    zorder=15,
-    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor='#666666', linewidth=2)
-)
+for category in categories:
+    start_idx = category["start"]
+    end_idx = category["end"]
+    color = category["color"]
+    name = category["name"]
+    
+    # 计算类别的起始和结束角度（考虑间隙）
+    start_angle = angles[start_idx] - (2 * np.pi / num_bench) / 2
+    end_angle = angles[end_idx - 1] + (2 * np.pi / num_bench) / 2
+    
+    # 绘制半弧线
+    arc_angles = np.linspace(start_angle, end_angle, 100)
+    
+    # 外弧
+    ax.plot(arc_angles, np.full_like(arc_angles, arc_outer_radius), 
+            color=color, linewidth=3, alpha=0.8, zorder=14)
+    
+    # 内弧
+    ax.plot(arc_angles, np.full_like(arc_angles, arc_inner_radius), 
+            color=color, linewidth=3, alpha=0.8, zorder=14)
+    
+    # 连接两端
+    ax.plot([start_angle, start_angle], [arc_inner_radius, arc_outer_radius], 
+            color=color, linewidth=3, alpha=0.8, zorder=14)
+    ax.plot([end_angle, end_angle], [arc_inner_radius, arc_outer_radius], 
+            color=color, linewidth=3, alpha=0.8, zorder=14)
+    
+    # 在半弧中心位置添加类别名称
+    center_angle = (start_angle + end_angle) / 2
+    text_radius = arc_outer_radius + 2
+    
+    # 计算文字旋转角度
+    text_rotation = np.degrees(center_angle)
+    if 90 < text_rotation < 270:
+        text_rotation = text_rotation + 180
+    
+    ax.text(
+        center_angle,
+        text_radius,
+        name,
+        ha='center',
+        va='center',
+        fontsize=9,
+        fontweight='bold',
+        color=color,
+        rotation=text_rotation,
+        rotation_mode="anchor",
+        zorder=15
+    )
 
 # ======================
 # 6. 中间白色圆圈 + 图片
