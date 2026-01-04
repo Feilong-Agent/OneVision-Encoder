@@ -225,21 +225,29 @@ for angle, benchmark in zip(angles, benchmarks):
             )
 
 # 添加类别分隔（使用半弧线代替图标）
+# 重新组织类别，将所有Image任务集中在一起
 # Video任务: 前7个 (indices 0-6)
-# Image任务: indices 7-10, 13-14 (共6个)
+# Image任务: 包含 ChartQA, DocVQA, InfoVQA, MMBench-EN, MMStar, RealWorldQA (indices 7-10, 13-14)
 # Document任务: OCRBench, OCRBench v2 (indices 11-12)
 
 # 定义类别边界和颜色（使用更淡的颜色避免冲突）
 categories = [
     {"name": "Video", "start": 0, "end": 7, "color": "#A8B3E8"},  # 淡蓝色
-    {"name": "Image", "start": 7, "end": 11, "color": "#F9D5E5"},  # 淡粉色
-    {"name": "Document", "start": 11, "end": 13, "color": "#D9D9D9"},  # 淡灰色
-    {"name": "Image", "start": 13, "end": 15, "color": "#F9D5E5"},  # 淡粉色
+    {"name": "Image", "start": 7, "end": 11, "color": "#F9D5E5"},  # 淡粉色 (ChartQA到MMBench-EN)
+    {"name": "Document", "start": 11, "end": 13, "color": "#D9D9D9"},  # 淡灰色 (OCRBench, OCRBench v2)
+    {"name": "Image", "start": 13, "end": 15, "color": "#F9D5E5"},  # 淡粉色 (MMStar, RealWorldQA)
 ]
 
-# 绘制类别分隔半弧（放在圆圈内部，接近数据集标签）- 更窄的范围并填充
+# 绘制类别分隔半弧（放在圆圈内部，接近数据集标签）- 更窄的范围并填充，增加间隙
 arc_outer_radius = 24
 arc_inner_radius = 23.5
+
+# 计算单个单元的角度
+unit = 2 * np.pi / num_bench
+
+# 方式 A：用比例指定间隙，表示在每个单元之间留多少比例的空白（例如 0.20 -> 20% 的单元宽度）
+gap_frac = 0.20
+gap = unit * gap_frac
 
 for category in categories:
     start_idx = category["start"]
@@ -247,9 +255,9 @@ for category in categories:
     color = category["color"]
     name = category["name"]
     
-    # 计算类别的起始和结束角度（考虑间隙）
-    start_angle = angles[start_idx] - (2 * np.pi / num_bench) / 2
-    end_angle = angles[end_idx - 1] + (2 * np.pi / num_bench) / 2
+    # 计算收紧后的起止角（每边缩进 gap/2）
+    start_angle = angles[start_idx] - unit/2 + gap/2
+    end_angle = angles[end_idx - 1] + unit/2 - gap/2
     
     # 绘制半弧线 - 使用填充的弧形区域
     arc_angles = np.linspace(start_angle, end_angle, 100)
@@ -274,7 +282,7 @@ for category in categories:
         name,
         ha='center',
         va='center',
-        fontsize=7,  # 更小的字体
+        fontsize=7.5,  # 稍微增大字体
         fontweight='bold',
         color=color,
         rotation=text_rotation,
