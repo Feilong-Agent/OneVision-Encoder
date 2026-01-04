@@ -229,17 +229,17 @@ for angle, benchmark in zip(angles, benchmarks):
 # Image任务: indices 7-10, 13-14 (共6个)
 # Document任务: OCRBench, OCRBench v2 (indices 11-12)
 
-# 定义类别边界和颜色
+# 定义类别边界和颜色（使用更淡的颜色避免冲突）
 categories = [
-    {"name": "Video", "start": 0, "end": 7, "color": "#5B5BD6"},
-    {"name": "Image", "start": 7, "end": 11, "color": "#F39AC1"},
-    {"name": "Document", "start": 11, "end": 13, "color": "#999999"},
-    {"name": "Image", "start": 13, "end": 15, "color": "#F39AC1"},
+    {"name": "Video", "start": 0, "end": 7, "color": "#A8B3E8"},  # 淡蓝色
+    {"name": "Image", "start": 7, "end": 11, "color": "#F9D5E5"},  # 淡粉色
+    {"name": "Document", "start": 11, "end": 13, "color": "#D9D9D9"},  # 淡灰色
+    {"name": "Image", "start": 13, "end": 15, "color": "#F9D5E5"},  # 淡粉色
 ]
 
-# 绘制类别分隔半弧（放在圆圈内部，接近数据集标签）
-arc_outer_radius = 26
-arc_inner_radius = 23
+# 绘制类别分隔半弧（放在圆圈内部，接近数据集标签）- 更窄的范围并填充
+arc_outer_radius = 24
+arc_inner_radius = 23.5
 
 for category in categories:
     start_idx = category["start"]
@@ -251,22 +251,13 @@ for category in categories:
     start_angle = angles[start_idx] - (2 * np.pi / num_bench) / 2
     end_angle = angles[end_idx - 1] + (2 * np.pi / num_bench) / 2
     
-    # 绘制半弧线
+    # 绘制半弧线 - 使用填充的弧形区域
     arc_angles = np.linspace(start_angle, end_angle, 100)
     
-    # 外弧
-    ax.plot(arc_angles, np.full_like(arc_angles, arc_outer_radius), 
-            color=color, linewidth=1.5, alpha=0.7, zorder=11)
-    
-    # 内弧
-    ax.plot(arc_angles, np.full_like(arc_angles, arc_inner_radius), 
-            color=color, linewidth=1.5, alpha=0.7, zorder=11)
-    
-    # 连接两端
-    ax.plot([start_angle, start_angle], [arc_inner_radius, arc_outer_radius], 
-            color=color, linewidth=1.5, alpha=0.7, zorder=11)
-    ax.plot([end_angle, end_angle], [arc_inner_radius, arc_outer_radius], 
-            color=color, linewidth=1.5, alpha=0.7, zorder=11)
+    # 创建填充的弧形区域（使用fill_between）
+    ax.fill_between(arc_angles, 
+                     arc_inner_radius, arc_outer_radius,
+                     color=color, alpha=0.6, zorder=11)
     
     # 在半弧中心位置添加类别名称（内圈，较小字体）
     center_angle = (start_angle + end_angle) / 2
