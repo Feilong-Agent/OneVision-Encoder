@@ -3,31 +3,53 @@ import matplotlib.pyplot as plt
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 
 # ======================
-# 1. 数据（Video和Image任务）
+# 1. 数据（Video、Image和Document任务）
 # ======================
-# Video任务的benchmarks
+# 重新组织布局：Video (left) -> Document (top/center) -> Image (right)
+# 这样Document在圆弧顶部中间，Video和Image在两侧
+
+# Video任务的benchmarks (7个)
 video_benchmarks = [
     "MVBench", "MLVU-dev", "NExT-QA (MC)", "VideoMME",
     "Perception Test", "TOMATO", "LongVideoBenc-Val-Video"
 ]
 
-# Image任务的benchmarks
-image_benchmarks = [
-    "ChartQA", "DocVQA", "InfoVQA", "MMBench-EN",
-    "OCRBench", "OCRBench v2", "MMStar", "RealWorldQA"
+# Document任务的benchmarks (2个) - 放在中间
+document_benchmarks = [
+    "OCRBench", "OCRBench v2"
 ]
 
-# 合并所有benchmarks
-benchmarks = video_benchmarks + image_benchmarks
+# Image任务的benchmarks (6个) - 合并所有Image任务
+image_benchmarks = [
+    "ChartQA", "DocVQA", "InfoVQA", "MMBench-EN", 
+    "MMStar", "RealWorldQA"
+]
+
+# 合并所有benchmarks: Video + Document + Image
+benchmarks = video_benchmarks + document_benchmarks + image_benchmarks
 
 # 每个 benchmark 对应的模型分数（使用Qwen3-4B的数据）
-# 将OV-ViT-Codec改名为OV-Encoder，移除OV-ViT
+# 数据顺序：Video (7) + Document (2) + Image (6)
 scores = {
-    "OV-Encoder": [51.9, 44.7, 74.6, 54.6, 60.4, 21.2, 50.4, 78.6, 79.7, 44.8, 78.5, 617, None, 52.8, 61.7],
-    "SigLIP2": [47.2, 48.4, 70.6, 46.8, 56.0, 22.3, 45.2, 76.4, 75.0, 42.0, 79.6, 621.0, 26.1, 55.0, 62.1],
+    "OV-Encoder": [
+        # Video (7个)
+        51.9, 44.7, 74.6, 54.6, 60.4, 21.2, 50.4,
+        # Document (2个)
+        617, None,
+        # Image (6个)
+        78.6, 79.7, 44.8, 78.5, 52.8, 61.7
+    ],
+    "SigLIP2": [
+        # Video (7个)
+        47.2, 48.4, 70.6, 46.8, 56.0, 22.3, 45.2,
+        # Document (2个)
+        621.0, 26.1,
+        # Image (6个)
+        76.4, 75.0, 42.0, 79.6, 55.0, 62.1
+    ],
 }
 
-# Note: OCRBench和OCRBench v2使用原始数值，其他都是百分比
+# Note: OCRBench使用原始数值（600+范围），其他都是百分比
 # 我们需要归一化OCRBench的值以便可视化
 
 models = list(scores.keys())
@@ -64,12 +86,13 @@ radial_end = 75    # 柱状图结束位置（缩短长度）
 
 # 计算所有数据的最小值和最大值，用于智能缩放
 # 归一化OCRBench数据：将600-630范围映射到0-100
+# 新布局中OCRBench在index 7位置
 all_values = []
 for model_name, values_list in scores.items():
     for i, v in enumerate(values_list):
         if v is not None:
-            # OCRBench (index 11) 归一化
-            if i == 11:
+            # OCRBench (index 7 in new layout) 归一化
+            if i == 7:
                 normalized_v = (v - 500) / 2  # 500->0, 700->100
                 all_values.append(normalized_v)
             else:
@@ -94,7 +117,7 @@ for i, model in enumerate(models):
     for j, v in enumerate(values_raw):
         if v is None:
             values.append(0)  # None值用0代替，后面不显示
-        elif j == 11:  # OCRBench归一化
+        elif j == 7:  # OCRBench归一化 (新布局中的位置)
             values.append((v - 500) / 2)
         else:
             values.append(v)
@@ -147,9 +170,9 @@ for i, model in enumerate(models):
             text_rotation = text_rotation + 90  # 向外旋转
         
         # 显示原始值
-        if j == 11:  # OCRBench显示原始分数
+        if j == 7:  # OCRBench显示原始分数 (新布局中的位置)
             display_val = f"{int(val_raw)}"
-        elif j == 12:  # OCRBench v2
+        elif j == 8:  # OCRBench v2 (新布局中的位置)
             display_val = f"{val_raw:.1f}"
         else:
             display_val = f"{val_raw:.1f}"
@@ -224,18 +247,15 @@ for angle, benchmark in zip(angles, benchmarks):
                 family='sans-serif'
             )
 
-# 添加类别分隔（使用半弧线代替图标）
-# 重新组织类别，将所有Image任务集中在一起
-# Video任务: 前7个 (indices 0-6)
-# Image任务: 包含 ChartQA, DocVQA, InfoVQA, MMBench-EN, MMStar, RealWorldQA (indices 7-10, 13-14)
-# Document任务: OCRBench, OCRBench v2 (indices 11-12)
+# 添加类别分隔（使用半弧线）
+# 新布局：Video (0-7) -> Document (7-9) -> Image (9-15)
+# Document在圆弧顶部/中间，Video和Image在两侧
 
 # 定义类别边界和颜色（使用更淡的颜色避免冲突）
 categories = [
-    {"name": "Video", "start": 0, "end": 7, "color": "#A8B3E8"},  # 淡蓝色
-    {"name": "Image", "start": 7, "end": 11, "color": "#F9D5E5"},  # 淡粉色 (ChartQA到MMBench-EN)
-    {"name": "Document", "start": 11, "end": 13, "color": "#D9D9D9"},  # 淡灰色 (OCRBench, OCRBench v2)
-    {"name": "Image", "start": 13, "end": 15, "color": "#F9D5E5"},  # 淡粉色 (MMStar, RealWorldQA)
+    {"name": "Video", "start": 0, "end": 7, "color": "#A8B3E8"},      # 淡蓝色 - 左侧
+    {"name": "Document", "start": 7, "end": 9, "color": "#D9D9D9"},   # 淡灰色 - 中间/顶部
+    {"name": "Image", "start": 9, "end": 15, "color": "#F9D5E5"},     # 淡粉色 - 右侧（合并所有Image）
 ]
 
 # 绘制类别分隔半弧（放在圆圈内部，接近数据集标签）- 更窄的范围并填充，增加间隙
