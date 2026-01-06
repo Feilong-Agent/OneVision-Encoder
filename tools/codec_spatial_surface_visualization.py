@@ -45,12 +45,33 @@ def flat_to_thw(flat: np.ndarray, T: int):
     w = remain % W
     return t, h, w
 
-def compute_spatial_prob(codec_dir: Path, T: int, topk: int, max_files: int, min_t: int):
+def compute_spatial_prob(codec_path: Path, T: int, topk: int, max_files: int, min_t: int):
     H, W = 16, 16
-    files = sorted(codec_dir.glob("*"))
+    
+    # Check if codec_path is a .lst file or a directory
+    if codec_path.is_file() and codec_path.suffix == '.lst':
+        # Read list of file paths from .lst file
+        with open(codec_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        # Each line may contain a path or path with additional info separated by comma/space
+        files = []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            # Handle formats like "path,label" or "path label" - take first part
+            parts = line.replace(',', ' ').split()
+            if parts:
+                file_path = Path(parts[0])
+                if file_path.exists():
+                    files.append(file_path)
+    else:
+        # Original behavior: glob all files in directory
+        files = sorted(codec_path.glob("*"))
 
     if max_files > 0:
         files = files[:max_files]
+    
     spatial_counts = np.zeros((H, W), dtype=np.float64)
     for f in tqdm(files, desc="Codec aggregation"):
         flat = load_flat_indices(f)
@@ -137,7 +158,8 @@ def plot_surface_with_grid(spatial_prob: np.ndarray, out_png: Path, out_pdf: Pat
 
 def main():
     ap = argparse.ArgumentParser(description="3D surface with grid ticks for Codec spatial probability")
-    ap.add_argument("--codec-dir", type=str, required=True)
+    ap.add_argument("--codec-dir", type=str, required=True, 
+                    help="Path to codec directory or .lst file containing list of index files")
     ap.add_argument("--T", type=int, default=64)
     ap.add_argument("--topk", type=int, default=2000)
     ap.add_argument("--max-files", type=int, default=1000)
