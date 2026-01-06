@@ -51,18 +51,18 @@ def compute_spatial_prob(codec_path: Path, T: int, topk: int, max_files: int, mi
     # Check if codec_path is a .lst file or a directory
     if codec_path.is_file() and codec_path.suffix == '.lst':
         # Read list of file paths from .lst file
-        with open(codec_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-        # Each line may contain a path or path with additional info separated by comma/space
         files = []
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            # Handle formats like "path,label" or "path label" - take first part
-            parts = line.replace(',', ' ').split()
-            if parts:
-                file_path = Path(parts[0])
+        with open(codec_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                # Handle formats like "path,label" or "path label" - take first part
+                # Try comma first, then fallback to space splitting
+                if ',' in line:
+                    file_path = Path(line.split(',')[0].strip())
+                else:
+                    file_path = Path(line.split()[0] if line.split() else line)
                 if file_path.exists():
                     files.append(file_path)
     else:
