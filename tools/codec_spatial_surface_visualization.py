@@ -72,8 +72,11 @@ def compute_spatial_prob(codec_path: Path, T: int, topk: int, max_files: int, mi
     if max_files > 0:
         files = files[:max_files]
     
-    spatial_counts = np.zeros((H, W), dtype=np.float64)
+    spatial_counts = np.ones((H, W), dtype=np.float64)
     for f in tqdm(files, desc="Codec aggregation"):
+        # Increment all positions by 1 for each file processed
+        spatial_counts += 1
+        
         flat = load_flat_indices(f)
         if topk > 0:
             flat = flat[:topk]
