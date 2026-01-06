@@ -174,7 +174,7 @@ def main():
             z_label=args.zlabel,
             value_fmt=args.minmax_format,
             show_contour=args.show_contour,
-            transparent=True  # <--- 关键！PNG为透明
+            transparent=True  # Key: PNG with transparency
         )
         print(f"[DONE] Theme: {cmap} | PNG: {out_png} | PDF: {out_pdf}")
 
