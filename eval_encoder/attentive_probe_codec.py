@@ -290,9 +290,12 @@ def get_feature(
                     selected_patches = videos_patches[batch_indices, visible_indices]  # [bs, K, C, patch_size, patch_size]
                     
                     # Causal intervention: Replace motion patches with non-motion patches
-                    if hasattr(args, 'replace_motion_with_nonmotion') and args.replace_motion_with_nonmotion:
+                    if getattr(args, 'replace_motion_with_nonmotion', False):
                         # Create a set of all visible indices for efficient lookup
                         total_patches = T * patches_per_frame
+                        
+                        # Pre-allocate tensors outside loop for efficiency
+                        all_indices = torch.arange(total_patches, device=device)
                         
                         # For each sample in batch, identify non-motion patches (those NOT in visible_indices)
                         for b in range(bs):
@@ -300,13 +303,15 @@ def get_feature(
                             vis_idx = visible_indices[b]  # [K]
                             
                             # Create mask for non-motion patches (all patches not in visible_indices)
-                            all_indices = torch.arange(total_patches, device=device)
                             is_nonmotion = torch.ones(total_patches, dtype=torch.bool, device=device)
                             is_nonmotion[vis_idx] = False
                             nonmotion_indices = all_indices[is_nonmotion]  # [total_patches - K]
                             
-                            # Sample K non-motion patches randomly (same number as motion patches)
-                            # Use same random seed for reproducibility if needed
+                            # Handle edge case: no non-motion patches available
+                            if nonmotion_indices.shape[0] == 0:
+                                raise ValueError(f"No non-motion patches available for sample {b}. K_keep={K} may be too large.")
+                            
+                            # Sample K non-motion patches randomly
                             if nonmotion_indices.shape[0] >= K:
                                 perm = torch.randperm(nonmotion_indices.shape[0], device=device)[:K]
                                 sampled_nonmotion_indices = nonmotion_indices[perm]
