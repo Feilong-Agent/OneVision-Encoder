@@ -111,6 +111,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num_spatial_crops", type=int, default=1, help="Number of spatial crops for evaluation")
 
     parser.add_argument("--probe_size", default=1, type=int)
+    
+    # Causal intervention experiment: Non-motion patch replacement
+    # Purpose: Test if codec-selected motion patches' content is necessary for performance gains,
+    # or if benefits come from token sparsity/positional bias alone.
+    # Method: Replace motion-heavy patches with non-motion patches from same video at same positions.
+    parser.add_argument("--replace_motion_with_nonmotion", action="store_true",
+                        help="Replace motion-heavy patches with non-motion patches from the same video at the same positions (causal intervention)")
+    
+    # Causal intervention experiment: Semantic specificity of motion cues
+    # Purpose: Test if the model relies on semantically aligned motion or just generic motion signals.
+    # Method: Replace motion-heavy patches with motion patches from unrelated videos at same positions.
+    parser.add_argument("--replace_motion_with_unrelated", action="store_true",
+                        help="Replace motion-heavy patches with motion patches from unrelated videos at the same positions (semantic specificity test)")
+    
+    # Negative control experiment: Patch-position shuffle
+    # Purpose: Sanity check to verify that spatiotemporal position matters.
+    # Method: Keep the same codec-selected patches but randomly permute their positions.
+    parser.add_argument("--shuffle_patch_positions", action="store_true",
+                        help="Randomly shuffle the positions of codec-selected patches while preserving their content (negative control)")
 
     return parser.parse_args()
 
@@ -284,6 +303,91 @@ def get_feature(
                     # Select corresponding patches for each batch
                     batch_indices = torch.arange(bs, device=device).view(bs, 1).expand(bs, K)
                     selected_patches = videos_patches[batch_indices, visible_indices]  # [bs, K, C, patch_size, patch_size]
+                    
+                    # Causal intervention experiment: Replace motion patches with non-motion patches
+                    # This tests whether the benefits of codec-based patch selection come from:
+                    # (a) motion-centric content, or (b) token sparsity / positional bias alone.
+                    #
+                    # Intervention: Replace codec-selected motion-heavy patches with non-motion patches
+                    # from the same video, while preserving their original spatiotemporal positions.
+                    # If performance drops significantly, it indicates that motion content is critical.
+                    if getattr(args, 'replace_motion_with_nonmotion', False):
+                        # Create a set of all visible indices for efficient lookup
+                        total_patches = T * patches_per_frame
+                        
+                        # Pre-allocate tensors outside loop for efficiency
+                        all_indices = torch.arange(total_patches, device=device)
+                        
+                        # For each sample in batch, identify non-motion patches (those NOT in visible_indices)
+                        for b in range(bs):
+                            # Get visible indices for this sample
+                            vis_idx = visible_indices[b]  # [K]
+                            
+                            # Create mask for non-motion patches (all patches not in visible_indices)
+                            is_nonmotion = torch.ones(total_patches, dtype=torch.bool, device=device)
+                            is_nonmotion[vis_idx] = False
+                            nonmotion_indices = all_indices[is_nonmotion]  # [total_patches - K]
+                            
+                            # Handle edge case: no non-motion patches available
+                            if nonmotion_indices.shape[0] == 0:
+                                raise ValueError(f"No non-motion patches available for sample {b}. K_keep={K} may be too large.")
+                            
+                            # Sample K non-motion patches randomly
+                            if nonmotion_indices.shape[0] >= K:
+                                perm = torch.randperm(nonmotion_indices.shape[0], device=device)[:K]
+                                sampled_nonmotion_indices = nonmotion_indices[perm]
+                            else:
+                                # If not enough non-motion patches, sample with replacement
+                                sampled_nonmotion_indices = nonmotion_indices[
+                                    torch.randint(0, nonmotion_indices.shape[0], (K,), device=device)
+                                ]
+                            
+                            # Replace motion patches with non-motion patches
+                            # The key insight: we keep the POSITIONS (visible_indices) but replace CONTENT
+                            nonmotion_patches = videos_patches[b, sampled_nonmotion_indices]  # [K, C, patch_size, patch_size]
+                            selected_patches[b] = nonmotion_patches
+                    
+                    # Causal intervention experiment: Replace motion patches with motion from unrelated videos
+                    # This tests whether the model relies on semantically aligned motion rather than generic motion signals.
+                    #
+                    # Intervention: Replace codec-selected motion-heavy patches with motion patches from
+                    # other videos in the batch (cross-video replacement), preserving spatiotemporal positions.
+                    # If performance drops significantly, it indicates semantic specificity is critical.
+                    if getattr(args, 'replace_motion_with_unrelated', False):
+                        # For each sample, replace its motion patches with motion patches from other videos
+                        if bs < 2:
+                            raise ValueError(f"Cross-video replacement requires batch_size >= 2, got batch_size={bs}")
+                        
+                        # For each sample in batch, use motion patches from a different video
+                        for b in range(bs):
+                            # Select a different video in the batch (not itself)
+                            other_video_idx = (b + 1) % bs  # Simple rotation: 0->1, 1->2, ..., (bs-1)->0
+                            
+                            # Get the motion patches from the other video (those at visible_indices)
+                            # visible_indices[b] are the positions, but we take content from other_video_idx
+                            unrelated_motion_patches = videos_patches[other_video_idx, visible_indices[b]]  # [K, C, patch_size, patch_size]
+                            
+                            # Replace current video's motion patches with unrelated motion patches
+                            # Key insight: same POSITIONS (visible_indices[b]) but CONTENT from different video
+                            selected_patches[b] = unrelated_motion_patches
+                    
+                    # Negative control experiment: Patch-position shuffle
+                    # This is a sanity check to verify that spatiotemporal position matters.
+                    #
+                    # Intervention: Keep the codec-selected patches (same content) but randomly permute
+                    # their spatiotemporal positions. This tests if the model relies on correct positioning.
+                    # If performance drops substantially more than other interventions, it confirms that
+                    # both content AND position are critical.
+                    if getattr(args, 'shuffle_patch_positions', False):
+                        # For each sample in batch, shuffle the positions of selected patches
+                        for b in range(bs):
+                            # Generate a random permutation of indices for this sample
+                            # This shuffles which position each patch content goes to
+                            perm = torch.randperm(K, device=device)
+                            
+                            # Apply permutation to selected patches
+                            # This keeps the same patch content but changes their positions
+                            selected_patches[b] = selected_patches[b][perm]
 
                     # Reorganize into 8-frame images
                     # Assume K patches need to be reorganized into 8 frames, each frame has K/8 patches
@@ -623,6 +727,20 @@ def get_model(args: argparse.Namespace) -> nn.Module:
 
 def main() -> None:
     args = parse_args()
+    
+    # Validate that intervention flags are mutually exclusive
+    intervention_flags = [
+        getattr(args, 'replace_motion_with_nonmotion', False),
+        getattr(args, 'replace_motion_with_unrelated', False),
+        getattr(args, 'shuffle_patch_positions', False)
+    ]
+    num_interventions = sum(intervention_flags)
+    if num_interventions > 1:
+        raise ValueError(
+            "Only one intervention flag can be set at a time. "
+            "Choose one of: --replace_motion_with_nonmotion, --replace_motion_with_unrelated, or --shuffle_patch_positions"
+        )
+    
     nb_classes_map = {"charadesego": 157, "CharadesEgo_v1_only3rd": 157, "Drone_Action": 13, "epic_noun": 300, "hmdb51": 51, "k400": 400, "k700": 700, "mit": 339, "rareact": 149, "ucf101": 101, "CharadesEgo_v1_only1st": 157, "diving48": 48, "epic_verb": 97, "k600": 600, "k710": 710, "perception_test": 63, "ssv2": 174, "SSV2": 174, "COIN": 150, "jester": 27}
     args.num_classes = nb_classes_map[args.dataset]
 
