@@ -111,6 +111,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num_spatial_crops", type=int, default=1, help="Number of spatial crops for evaluation")
 
     parser.add_argument("--probe_size", default=1, type=int)
+    
+    # Causal intervention experiment: replace motion patches with non-motion patches
+    parser.add_argument("--replace_motion_with_nonmotion", action="store_true",
+                        help="Replace motion-heavy patches with non-motion patches from the same video at the same positions (causal intervention)")
 
     return parser.parse_args()
 
@@ -284,6 +288,38 @@ def get_feature(
                     # Select corresponding patches for each batch
                     batch_indices = torch.arange(bs, device=device).view(bs, 1).expand(bs, K)
                     selected_patches = videos_patches[batch_indices, visible_indices]  # [bs, K, C, patch_size, patch_size]
+                    
+                    # Causal intervention: Replace motion patches with non-motion patches
+                    if hasattr(args, 'replace_motion_with_nonmotion') and args.replace_motion_with_nonmotion:
+                        # Create a set of all visible indices for efficient lookup
+                        total_patches = T * patches_per_frame
+                        
+                        # For each sample in batch, identify non-motion patches (those NOT in visible_indices)
+                        for b in range(bs):
+                            # Get visible indices for this sample
+                            vis_idx = visible_indices[b]  # [K]
+                            
+                            # Create mask for non-motion patches (all patches not in visible_indices)
+                            all_indices = torch.arange(total_patches, device=device)
+                            is_nonmotion = torch.ones(total_patches, dtype=torch.bool, device=device)
+                            is_nonmotion[vis_idx] = False
+                            nonmotion_indices = all_indices[is_nonmotion]  # [total_patches - K]
+                            
+                            # Sample K non-motion patches randomly (same number as motion patches)
+                            # Use same random seed for reproducibility if needed
+                            if nonmotion_indices.shape[0] >= K:
+                                perm = torch.randperm(nonmotion_indices.shape[0], device=device)[:K]
+                                sampled_nonmotion_indices = nonmotion_indices[perm]
+                            else:
+                                # If not enough non-motion patches, sample with replacement
+                                sampled_nonmotion_indices = nonmotion_indices[
+                                    torch.randint(0, nonmotion_indices.shape[0], (K,), device=device)
+                                ]
+                            
+                            # Replace motion patches with non-motion patches
+                            # The key insight: we keep the POSITIONS (visible_indices) but replace CONTENT
+                            nonmotion_patches = videos_patches[b, sampled_nonmotion_indices]  # [K, C, patch_size, patch_size]
+                            selected_patches[b] = nonmotion_patches
 
                     # Reorganize into 8-frame images
                     # Assume K patches need to be reorganized into 8 frames, each frame has K/8 patches
