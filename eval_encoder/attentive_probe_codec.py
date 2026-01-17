@@ -118,6 +118,12 @@ def parse_args() -> argparse.Namespace:
     # Method: Replace motion-heavy patches with non-motion patches from same video at same positions.
     parser.add_argument("--replace_motion_with_nonmotion", action="store_true",
                         help="Replace motion-heavy patches with non-motion patches from the same video at the same positions (causal intervention)")
+    
+    # Causal intervention experiment: Semantic specificity of motion cues
+    # Purpose: Test if the model relies on semantically aligned motion or just generic motion signals.
+    # Method: Replace motion-heavy patches with motion patches from unrelated videos at same positions.
+    parser.add_argument("--replace_motion_with_unrelated", action="store_true",
+                        help="Replace motion-heavy patches with motion patches from unrelated videos at the same positions (semantic specificity test)")
 
     return parser.parse_args()
 
@@ -334,6 +340,30 @@ def get_feature(
                             # The key insight: we keep the POSITIONS (visible_indices) but replace CONTENT
                             nonmotion_patches = videos_patches[b, sampled_nonmotion_indices]  # [K, C, patch_size, patch_size]
                             selected_patches[b] = nonmotion_patches
+                    
+                    # Causal intervention experiment: Replace motion patches with motion from unrelated videos
+                    # This tests whether the model relies on semantically aligned motion rather than generic motion signals.
+                    #
+                    # Intervention: Replace codec-selected motion-heavy patches with motion patches from
+                    # other videos in the batch (cross-video replacement), preserving spatiotemporal positions.
+                    # If performance drops significantly, it indicates semantic specificity is critical.
+                    if getattr(args, 'replace_motion_with_unrelated', False):
+                        # For each sample, replace its motion patches with motion patches from other videos
+                        if bs < 2:
+                            raise ValueError("Cross-video replacement requires batch_size >= 2")
+                        
+                        # For each sample in batch, use motion patches from a different video
+                        for b in range(bs):
+                            # Select a different video in the batch (not itself)
+                            other_video_idx = (b + 1) % bs  # Simple rotation: 0->1, 1->2, ..., (bs-1)->0
+                            
+                            # Get the motion patches from the other video (those at visible_indices)
+                            # visible_indices[b] are the positions, but we take content from other_video_idx
+                            unrelated_motion_patches = videos_patches[other_video_idx, visible_indices[b]]  # [K, C, patch_size, patch_size]
+                            
+                            # Replace current video's motion patches with unrelated motion patches
+                            # Key insight: same POSITIONS (visible_indices[b]) but CONTENT from different video
+                            selected_patches[b] = unrelated_motion_patches
 
                     # Reorganize into 8-frame images
                     # Assume K patches need to be reorganized into 8 frames, each frame has K/8 patches
