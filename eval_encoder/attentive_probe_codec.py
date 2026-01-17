@@ -124,6 +124,12 @@ def parse_args() -> argparse.Namespace:
     # Method: Replace motion-heavy patches with motion patches from unrelated videos at same positions.
     parser.add_argument("--replace_motion_with_unrelated", action="store_true",
                         help="Replace motion-heavy patches with motion patches from unrelated videos at the same positions (semantic specificity test)")
+    
+    # Negative control experiment: Patch-position shuffle
+    # Purpose: Sanity check to verify that spatiotemporal position matters.
+    # Method: Keep the same codec-selected patches but randomly permute their positions.
+    parser.add_argument("--shuffle_patch_positions", action="store_true",
+                        help="Randomly shuffle the positions of codec-selected patches while preserving their content (negative control)")
 
     return parser.parse_args()
 
@@ -364,6 +370,24 @@ def get_feature(
                             # Replace current video's motion patches with unrelated motion patches
                             # Key insight: same POSITIONS (visible_indices[b]) but CONTENT from different video
                             selected_patches[b] = unrelated_motion_patches
+                    
+                    # Negative control experiment: Patch-position shuffle
+                    # This is a sanity check to verify that spatiotemporal position matters.
+                    #
+                    # Intervention: Keep the codec-selected patches (same content) but randomly permute
+                    # their spatiotemporal positions. This tests if the model relies on correct positioning.
+                    # If performance drops substantially more than other interventions, it confirms that
+                    # both content AND position are critical.
+                    if getattr(args, 'shuffle_patch_positions', False):
+                        # For each sample in batch, shuffle the positions of selected patches
+                        for b in range(bs):
+                            # Generate a random permutation of indices for this sample
+                            # This shuffles which position each patch content goes to
+                            perm = torch.randperm(K, device=device)
+                            
+                            # Apply permutation to selected patches
+                            # This keeps the same patch content but changes their positions
+                            selected_patches[b] = selected_patches[b][perm]
 
                     # Reorganize into 8-frame images
                     # Assume K patches need to be reorganized into 8 frames, each frame has K/8 patches

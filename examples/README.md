@@ -82,6 +82,47 @@ If the model relies on semantically aligned motion:
 - Performance should drop significantly (similar or greater than non-motion replacement)
 - This confirms the model understands motion in context, not just detects motion presence
 
+## Experiment 3: Patch-Position Shuffle (Negative Control)
+
+### Overview
+
+This is a **sanity check** to verify that spatiotemporal positioning is critical. It serves as a negative control for the other experiments.
+
+### Methodology
+
+The intervention works by:
+1. Keeping the same codec-selected patches (visual content preserved)
+2. Randomly permuting their spatiotemporal positions
+3. Testing if the model relies on correct positioning
+
+If performance drops substantially MORE than other interventions, it confirms that both content AND position are critical.
+
+### Usage
+
+Run the patch-position shuffle experiment:
+
+```bash
+# Using default parameters (diving48 dataset)
+./examples/run_patch_shuffle.sh
+
+# Specify a different dataset
+./examples/run_patch_shuffle.sh ssv2
+
+# Customize parameters via environment variables
+K_KEEP=1024 BATCH_SIZE=16 ./examples/run_patch_shuffle.sh diving48
+```
+
+### Expected Results (Negative Control)
+
+This intervention should cause **larger performance drops** than the other experiments:
+
+| Dataset | Baseline Acc | Expected Drop | Note |
+|---------|-------------|---------------|------|
+| Diving48 | ~75% | -22.4 points | Larger than non-motion (-13.3) |
+| SSV2 | ~60% | -17.4 points | Larger than non-motion (-7.1) |
+
+This confirms that proper spatiotemporal positioning is critical for model performance.
+
 ## Comparison Across All Experiments
 
 To run all experiments and compare:
@@ -100,6 +141,9 @@ python eval_encoder/attentive_probe_codec.py \
 # 3. Unrelated motion replacement (semantic specificity)
 ./examples/run_semantic_specificity.sh diving48
 
+# 4. Patch-position shuffle (negative control)
+./examples/run_patch_shuffle.sh diving48
+
 # Compare results
 cat fewshot_video_report/*/report_*.txt
 ```
@@ -108,13 +152,15 @@ Results locations:
 - Baseline: `fewshot_video_report/baseline/report_*.txt`
 - Non-motion: `fewshot_video_report/ActionRecognition_intervention/report_*.txt`
 - Semantic specificity: `fewshot_video_report/ActionRecognition_semantic_specificity/report_*.txt`
+- Patch shuffle: `fewshot_video_report/ActionRecognition_shuffle/report_*.txt`
 
 ## Parameters
 
-Key parameters for both experiments:
+Key parameters for all experiments:
 
 - `--replace_motion_with_nonmotion`: Enable non-motion patch replacement
 - `--replace_motion_with_unrelated`: Enable semantic specificity test (cross-video motion)
+- `--shuffle_patch_positions`: Enable patch-position shuffle (negative control)
 - `--K_keep`: Number of patches to keep (default: 2048)
 - `--dataset`: Dataset to evaluate on (diving48, ssv2, k400, etc.)
 - `--batch_size`: Batch size (must be >= 2 for semantic specificity test)
@@ -123,9 +169,10 @@ Key parameters for both experiments:
 
 ## Notes
 
-1. Both experiments require HEVC-encoded videos with accessible codec features
+1. All experiments require HEVC-encoded videos with accessible codec features
 2. Cache directory will store computed visible indices for faster subsequent runs
 3. Results are saved to the specified report directory
 4. The semantic specificity experiment uses deterministic rotation for cross-video pairing
-5. Run multiple times for statistical significance
+5. The patch-position shuffle uses random permutation for each sample
+6. Run multiple times for statistical significance
 
