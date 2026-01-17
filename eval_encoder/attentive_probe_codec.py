@@ -727,6 +727,20 @@ def get_model(args: argparse.Namespace) -> nn.Module:
 
 def main() -> None:
     args = parse_args()
+    
+    # Validate that intervention flags are mutually exclusive
+    intervention_flags = [
+        getattr(args, 'replace_motion_with_nonmotion', False),
+        getattr(args, 'replace_motion_with_unrelated', False),
+        getattr(args, 'shuffle_patch_positions', False)
+    ]
+    num_interventions = sum(intervention_flags)
+    if num_interventions > 1:
+        raise ValueError(
+            "Only one intervention flag can be set at a time. "
+            "Choose one of: --replace_motion_with_nonmotion, --replace_motion_with_unrelated, or --shuffle_patch_positions"
+        )
+    
     nb_classes_map = {"charadesego": 157, "CharadesEgo_v1_only3rd": 157, "Drone_Action": 13, "epic_noun": 300, "hmdb51": 51, "k400": 400, "k700": 700, "mit": 339, "rareact": 149, "ucf101": 101, "CharadesEgo_v1_only1st": 157, "diving48": 48, "epic_verb": 97, "k600": 600, "k710": 710, "perception_test": 63, "ssv2": 174, "SSV2": 174, "COIN": 150, "jester": 27}
     args.num_classes = nb_classes_map[args.dataset]
 
