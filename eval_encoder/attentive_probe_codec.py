@@ -112,7 +112,10 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--probe_size", default=1, type=int)
     
-    # Causal intervention experiment: replace motion patches with non-motion patches
+    # Causal intervention experiment: Non-motion patch replacement
+    # Purpose: Test if codec-selected motion patches' content is necessary for performance gains,
+    # or if benefits come from token sparsity/positional bias alone.
+    # Method: Replace motion-heavy patches with non-motion patches from same video at same positions.
     parser.add_argument("--replace_motion_with_nonmotion", action="store_true",
                         help="Replace motion-heavy patches with non-motion patches from the same video at the same positions (causal intervention)")
 
@@ -289,7 +292,13 @@ def get_feature(
                     batch_indices = torch.arange(bs, device=device).view(bs, 1).expand(bs, K)
                     selected_patches = videos_patches[batch_indices, visible_indices]  # [bs, K, C, patch_size, patch_size]
                     
-                    # Causal intervention: Replace motion patches with non-motion patches
+                    # Causal intervention experiment: Replace motion patches with non-motion patches
+                    # This tests whether the benefits of codec-based patch selection come from:
+                    # (a) motion-centric content, or (b) token sparsity / positional bias alone.
+                    #
+                    # Intervention: Replace codec-selected motion-heavy patches with non-motion patches
+                    # from the same video, while preserving their original spatiotemporal positions.
+                    # If performance drops significantly, it indicates that motion content is critical.
                     if getattr(args, 'replace_motion_with_nonmotion', False):
                         # Create a set of all visible indices for efficient lookup
                         total_patches = T * patches_per_frame
