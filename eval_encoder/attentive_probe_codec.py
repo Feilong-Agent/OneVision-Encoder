@@ -350,7 +350,7 @@ def get_feature(
                     if getattr(args, 'replace_motion_with_unrelated', False):
                         # For each sample, replace its motion patches with motion patches from other videos
                         if bs < 2:
-                            raise ValueError("Cross-video replacement requires batch_size >= 2")
+                            raise ValueError(f"Cross-video replacement requires batch_size >= 2, got batch_size={bs}")
                         
                         # For each sample in batch, use motion patches from a different video
                         for b in range(bs):

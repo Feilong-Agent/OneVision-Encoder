@@ -19,6 +19,12 @@ NUM_FRAMES=${NUM_FRAMES:-64}
 DEFAULT_EPOCH=${DEFAULT_EPOCH:-10}
 DEFAULT_LR=${DEFAULT_LR:-1e-4}
 
+# Validate batch size
+if [ "$BATCH_SIZE" -lt 2 ]; then
+    echo "Error: Cross-video replacement requires BATCH_SIZE >= 2, got BATCH_SIZE=${BATCH_SIZE}"
+    exit 1
+fi
+
 echo "Running semantic specificity experiment on ${DATASET}"
 echo "Motion patches will be replaced with motion patches from unrelated videos"
 echo "K_keep: ${K_KEEP}"
